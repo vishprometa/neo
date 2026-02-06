@@ -75,6 +75,136 @@ export type SyncProgressCallback = (progress: SyncProgress) => void;
 type LogLevel = 'info' | 'warning' | 'error' | 'success';
 type LogFn = (level: LogLevel, message: string) => void;
 
+interface IgnoreRules {
+  names: Set<string>;
+  dirNames: Set<string>;
+  fileNames: Set<string>;
+  extensions: Set<string>;
+  paths: Set<string>;
+  dirPaths: Set<string>;
+}
+
+function createIgnoreRules(): IgnoreRules {
+  return {
+    names: new Set(),
+    dirNames: new Set(),
+    fileNames: new Set(),
+    extensions: new Set(),
+    paths: new Set(),
+    dirPaths: new Set(),
+  };
+}
+
+function normalizeIgnoreValue(value: string): string {
+  return value
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '');
+}
+
+function parseIgnoreRules(content: string): IgnoreRules {
+  const rules = createIgnoreRules();
+  const lines = content.split('\n');
+
+  for (const line of lines) {
+    const raw = line.trim();
+    if (!raw || raw.startsWith('#')) continue;
+
+    const normalized = normalizeIgnoreValue(raw);
+    if (!normalized) continue;
+
+    if (raw.startsWith('ext:')) {
+      const ext = normalizeIgnoreValue(raw.slice(4)).replace(/^\./, '').toLowerCase();
+      if (ext) rules.extensions.add(ext);
+      continue;
+    }
+
+    if (raw.startsWith('dir:')) {
+      const value = normalizeIgnoreValue(raw.slice(4));
+      if (!value) continue;
+      if (value.includes('/')) rules.dirPaths.add(value);
+      else rules.dirNames.add(value);
+      continue;
+    }
+
+    if (raw.startsWith('file:')) {
+      const value = normalizeIgnoreValue(raw.slice(5));
+      if (!value) continue;
+      if (value.includes('/')) rules.paths.add(value);
+      else rules.fileNames.add(value);
+      continue;
+    }
+
+    if (raw.startsWith('path:')) {
+      const value = normalizeIgnoreValue(raw.slice(5));
+      if (!value) continue;
+      if (raw.trim().endsWith('/')) rules.dirPaths.add(value);
+      else rules.paths.add(value);
+      continue;
+    }
+
+    if (raw.startsWith('*.')) {
+      const ext = raw.slice(2).trim().toLowerCase();
+      if (ext) rules.extensions.add(ext);
+      continue;
+    }
+
+    if (raw.trim().endsWith('/')) {
+      const value = normalizeIgnoreValue(raw.slice(0, -1));
+      if (!value) continue;
+      if (value.includes('/')) rules.dirPaths.add(value);
+      else rules.dirNames.add(value);
+      continue;
+    }
+
+    if (normalized.includes('/')) {
+      rules.paths.add(normalized);
+      continue;
+    }
+
+    rules.names.add(normalized);
+  }
+
+  return rules;
+}
+
+async function loadIgnoreRules(workspaceDir: string, onLog?: LogFn): Promise<IgnoreRules> {
+  try {
+    const ignorePath = await join(workspaceDir, '.neoignore');
+    if (!(await exists(ignorePath))) {
+      return createIgnoreRules();
+    }
+    const content = await readTextFile(ignorePath);
+    const rules = parseIgnoreRules(content);
+    const totalRules = rules.names.size + rules.dirNames.size + rules.fileNames.size +
+      rules.extensions.size + rules.paths.size + rules.dirPaths.size;
+    onLog?.('info', `[Memory] Loaded .neoignore with ${totalRules} rule${totalRules === 1 ? '' : 's'}`);
+    return rules;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    onLog?.('warning', `[Memory] Failed to read .neoignore: ${msg}`);
+    return createIgnoreRules();
+  }
+}
+
+function normalizeRelativePath(relativePath: string): string {
+  return relativePath.replace(/\\/g, '/');
+}
+
+function shouldIgnoreDir(name: string, relativePath: string, rules: IgnoreRules): boolean {
+  return rules.dirNames.has(name) ||
+    rules.names.has(name) ||
+    rules.dirPaths.has(relativePath);
+}
+
+function shouldIgnoreFile(name: string, relativePath: string, extension: string, rules: IgnoreRules): boolean {
+  return rules.fileNames.has(name) ||
+    rules.names.has(name) ||
+    rules.paths.has(relativePath) ||
+    (extension && rules.extensions.has(extension.toLowerCase()));
+}
+
 /**
  * Get the .neomemory directory path for a workspace
  */
@@ -163,9 +293,11 @@ function slugifyPath(relativePath: string): string {
  */
 async function scanDirectory(
   workspaceDir: string,
-  onProgress?: SyncProgressCallback
+  onProgress?: SyncProgressCallback,
+  onLog?: LogFn
 ): Promise<FileInfo[]> {
   const files: FileInfo[] = [];
+  const ignoreRules = await loadIgnoreRules(workspaceDir, onLog);
 
   async function scan(dir: string, depth: number = 0): Promise<void> {
     if (depth > 15) return; // Prevent infinite recursion
@@ -174,19 +306,20 @@ async function scanDirectory(
       const entries = await readDir(dir);
 
       for (const entry of entries) {
-        if (entry.name.startsWith('.') && entry.name !== '.env') continue;
-
         const fullPath = await join(dir, entry.name);
-        const relativePath = fullPath.slice(workspaceDir.length + 1);
+        const relativePath = normalizeRelativePath(fullPath.slice(workspaceDir.length + 1));
 
         if (entry.isDirectory) {
+          if (entry.name.startsWith('.')) continue;
           if (SKIP_DIRS.has(entry.name)) continue;
+          if (shouldIgnoreDir(entry.name, relativePath, ignoreRules)) continue;
           await scan(fullPath, depth + 1);
         } else {
           if (SKIP_FILES.has(entry.name)) continue;
 
           const ext = entry.name.split('.').pop()?.toLowerCase() || '';
           if (!TEXT_EXTENSIONS.has(ext)) continue;
+          if (shouldIgnoreFile(entry.name, relativePath, ext, ignoreRules)) continue;
 
           try {
             const fileStat = await stat(fullPath);
@@ -246,7 +379,7 @@ export async function syncDirectory(
   // Scan for files
   let files: FileInfo[];
   try {
-    files = await scanDirectory(workspaceDir, onProgress);
+    files = await scanDirectory(workspaceDir, onProgress, onLog);
   } catch (err) {
     const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : JSON.stringify(err);
     throw new Error(`Failed to scan workspace: ${msg}`);
@@ -277,12 +410,25 @@ export async function syncDirectory(
   let skipped = 0;
   let errors = 0;
 
-  // Process files that need updating
-  const filesToProcess = files.filter((file) => {
+  // Process files that need updating (or are missing summaries)
+  const filesToProcess: FileInfo[] = [];
+  for (const file of files) {
     const existing = manifest.entries[file.relativePath];
-    if (!existing) return true;
-    return file.modified > existing.modified;
-  });
+    if (!existing) {
+      filesToProcess.push(file);
+      continue;
+    }
+    if (file.modified > existing.modified) {
+      filesToProcess.push(file);
+      continue;
+    }
+    if (existing.memoryFile) {
+      const memoryFilePath = await join(filesDir, existing.memoryFile);
+      if (!(await exists(memoryFilePath))) {
+        filesToProcess.push(file);
+      }
+    }
+  }
 
   // Validate API key with a quick test if there are files to process
   if (filesToProcess.length > 0) {
@@ -326,6 +472,7 @@ export async function syncDirectory(
 
   const indexedFiles: string[] = [];
   const remainingFiles = new Set(filesToSummarize.map(({ file }) => file.relativePath));
+  const fileByPath = new Map(filesToSummarize.map(({ file }) => [file.relativePath, file]));
   await saveProgress(memoryDir, {
     total: filesToSummarize.length,
     indexed,
@@ -338,9 +485,8 @@ export async function syncDirectory(
 
   // Batch summarize all files (handles rate limiting internally)
   if (filesToSummarize.length > 0) {
-    let batchResult;
     try {
-      batchResult = await summarizeFilesBatch(
+      await summarizeFilesBatch(
         config,
         filesToSummarize.map(({ file, content }) => ({
           relativePath: file.relativePath,
@@ -356,9 +502,99 @@ export async function syncDirectory(
           });
         },
         signal,
-        onLog
+        onLog,
+        async (batchPaths, batchResult) => {
+          const errorByFile = new Map<string, string>();
+          for (const err of batchResult.errors) {
+            const splitIdx = err.indexOf(':');
+            if (splitIdx > 0) {
+              const path = err.slice(0, splitIdx).trim();
+              const message = err.slice(splitIdx + 1).trim();
+              errorByFile.set(path, message);
+            }
+          }
+
+          for (const path of batchPaths) {
+            if (signal?.aborted) {
+              throw new DOMException('Sync operation was aborted', 'AbortError');
+            }
+            const file = fileByPath.get(path);
+            if (!file) continue;
+
+            const summary = batchResult.summaries.get(path);
+            if (summary) {
+              try {
+                const memoryFileName = slugifyPath(file.relativePath) + '.md';
+                const memoryFilePath = await join(filesDir, memoryFileName);
+
+                await writeTextFile(memoryFilePath, summary);
+                onLog?.('success', `[Memory] Saved summary for ${file.relativePath}`);
+
+                manifest.entries[file.relativePath] = {
+                  path: file.relativePath,
+                  modified: file.modified,
+                  memoryFile: memoryFileName,
+                  summarizedAt: Date.now(),
+                };
+                await saveManifest(memoryDir, manifest);
+
+                indexed++;
+                indexedFiles.push(file.relativePath);
+                remainingFiles.delete(file.relativePath);
+              } catch (err) {
+                console.error(`Error writing summary for ${file.relativePath}:`, err);
+                onLog?.('error', `[Memory] Error writing summary for ${file.relativePath}`);
+                errors++;
+              }
+            } else {
+              errors++;
+              const errorMessage = errorByFile.get(file.relativePath) || 'Summary not generated due to an unknown error.';
+              try {
+                const memoryFileName = slugifyPath(file.relativePath) + '.md';
+                const memoryFilePath = await join(filesDir, memoryFileName);
+                const stub = `# ${file.relativePath.split('/').pop()}
+Path: \`${file.relativePath}\`
+Type: ${file.extension.toUpperCase()}
+Indexed: ${new Date().toISOString()}
+
+---
+
+Summary not generated. Error:
+${errorMessage}
+`;
+                await writeTextFile(memoryFilePath, stub);
+                onLog?.('warning', `[Memory] Wrote error stub for ${file.relativePath}`);
+              } catch (err) {
+                console.error(`Error writing error stub for ${file.relativePath}:`, err);
+                onLog?.('error', `[Memory] Error writing error stub for ${file.relativePath}`);
+              }
+            }
+
+            await saveProgress(memoryDir, {
+              total: filesToSummarize.length,
+              indexed,
+              skipped: files.length - filesToProcess.length,
+              errors,
+              indexedFiles,
+              remainingFiles: Array.from(remainingFiles),
+              lastUpdated: Date.now(),
+            });
+          }
+        }
       );
     } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        await saveProgress(memoryDir, {
+          total: filesToSummarize.length,
+          indexed,
+          skipped: files.length - filesToProcess.length,
+          errors,
+          indexedFiles,
+          remainingFiles: Array.from(remainingFiles),
+          lastUpdated: Date.now(),
+        });
+        throw err;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       onLog?.('error', `[Memory] Summarization failed: ${msg}`);
       await saveProgress(memoryDir, {
@@ -371,80 +607,6 @@ export async function syncDirectory(
         lastUpdated: Date.now(),
       });
       throw err;
-    }
-
-    const errorByFile = new Map<string, string>();
-    for (const err of batchResult.errors) {
-      const splitIdx = err.indexOf(':');
-      if (splitIdx > 0) {
-        const path = err.slice(0, splitIdx).trim();
-        const message = err.slice(splitIdx + 1).trim();
-        errorByFile.set(path, message);
-      }
-    }
-
-    // Write summaries and update manifest
-    for (const { file } of filesToSummarize) {
-      if (signal?.aborted) {
-        throw new DOMException('Sync operation was aborted', 'AbortError');
-      }
-      const summary = batchResult.summaries.get(file.relativePath);
-      if (summary) {
-        try {
-          const memoryFileName = slugifyPath(file.relativePath) + '.md';
-          const memoryFilePath = await join(filesDir, memoryFileName);
-
-          await writeTextFile(memoryFilePath, summary);
-          onLog?.('success', `[Memory] Saved summary for ${file.relativePath}`);
-
-          manifest.entries[file.relativePath] = {
-            path: file.relativePath,
-            modified: file.modified,
-            memoryFile: memoryFileName,
-            summarizedAt: Date.now(),
-          };
-
-          indexed++;
-          indexedFiles.push(file.relativePath);
-          remainingFiles.delete(file.relativePath);
-        } catch (err) {
-          console.error(`Error writing summary for ${file.relativePath}:`, err);
-          onLog?.('error', `[Memory] Error writing summary for ${file.relativePath}`);
-          errors++;
-        }
-      } else {
-        errors++;
-        const errorMessage = errorByFile.get(file.relativePath) || 'Summary not generated due to an unknown error.';
-        try {
-          const memoryFileName = slugifyPath(file.relativePath) + '.md';
-          const memoryFilePath = await join(filesDir, memoryFileName);
-          const stub = `# ${file.relativePath.split('/').pop()}
-Path: \`${file.relativePath}\`
-Type: ${file.extension.toUpperCase()}
-Indexed: ${new Date().toISOString()}
-
----
-
-Summary not generated. Error:
-${errorMessage}
-`;
-          await writeTextFile(memoryFilePath, stub);
-          onLog?.('warning', `[Memory] Wrote error stub for ${file.relativePath}`);
-        } catch (err) {
-          console.error(`Error writing error stub for ${file.relativePath}:`, err);
-          onLog?.('error', `[Memory] Error writing error stub for ${file.relativePath}`);
-        }
-      }
-
-      await saveProgress(memoryDir, {
-        total: filesToSummarize.length,
-        indexed,
-        skipped: files.length - filesToProcess.length,
-        errors,
-        indexedFiles,
-        remainingFiles: Array.from(remainingFiles),
-        lastUpdated: Date.now(),
-      });
     }
   }
 

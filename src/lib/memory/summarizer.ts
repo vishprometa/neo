@@ -32,6 +32,7 @@ interface BatchResult {
 
 type LogLevel = 'info' | 'warning' | 'error' | 'success';
 type LogFn = (level: LogLevel, message: string) => void;
+type BatchCallback = (batchPaths: string[], result: BatchResult) => void | Promise<void>;
 
 /**
  * Sleep helper
@@ -131,7 +132,8 @@ export async function summarizeFilesBatch(
   files: FileToSummarize[],
   onProgress?: (processed: number, total: number) => void,
   signal?: AbortSignal,
-  onLog?: LogFn
+  onLog?: LogFn,
+  onBatchComplete?: BatchCallback
 ): Promise<BatchResult> {
   // Check if already aborted
   if (signal?.aborted) {
@@ -218,6 +220,11 @@ export async function summarizeFilesBatch(
           summaries.set(path, summary);
         }
 
+        if (onBatchComplete) {
+          const batchPaths = batch.map((f) => f.relativePath);
+          await onBatchComplete(batchPaths, { summaries: batchSummaries, errors: [] });
+        }
+
         processedFiles += batch.length;
         onProgress?.(processedFiles, files.length);
 
@@ -245,8 +252,11 @@ export async function summarizeFilesBatch(
         // Non-retryable error or max retries exceeded
         console.error(`[Memory] Batch ${i + 1} failed:`, errMsg);
         onLog?.('error', `[Memory] Batch ${i + 1} failed: ${errMsg}`);
-        for (const file of batch) {
-          errors.push(`${file.relativePath}: ${errMsg}`);
+        const batchErrors = batch.map((file) => `${file.relativePath}: ${errMsg}`);
+        errors.push(...batchErrors);
+        if (onBatchComplete) {
+          const batchPaths = batch.map((f) => f.relativePath);
+          await onBatchComplete(batchPaths, { summaries: new Map(), errors: batchErrors });
         }
         processedFiles += batch.length;
         onProgress?.(processedFiles, files.length);
