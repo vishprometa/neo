@@ -13,7 +13,7 @@ import type { FileInfo, ManifestEntry } from './service';
 /** Maximum tokens per batch (conservative estimate: 4 chars = 1 token) */
 const MAX_BATCH_CHARS = 12000;
 /** Maximum files per batch */
-const MAX_FILES_PER_BATCH = 8;
+const MAX_FILES_PER_BATCH = 1;
 /** Base delay between batches (ms) */
 const BASE_DELAY = 500;
 /** Max retries on rate limit */
@@ -30,11 +30,33 @@ interface BatchResult {
   errors: string[];
 }
 
+type LogLevel = 'info' | 'warning' | 'error' | 'success';
+type LogFn = (level: LogLevel, message: string) => void;
+
 /**
  * Sleep helper
  */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return sleep(ms);
+  if (signal.aborted) {
+    throw new DOMException('Summarization was aborted', 'AbortError');
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      reject(new DOMException('Summarization was aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort);
+  });
 }
 
 /**
@@ -72,6 +94,11 @@ function getSmartTruncateLimit(extension: string): number {
   return limits[extension.toLowerCase()] || 2000;
 }
 
+function truncateForLog(text: string, maxChars: number = 1200): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + '\n... (truncated)';
+}
+
 /**
  * Summarize a single file
  * This is the public API - internally uses batching when called via summarizeFilesBatch
@@ -80,12 +107,14 @@ export async function summarizeFile(
   config: ProviderConfig,
   relativePath: string,
   content: string,
-  extension: string
+  extension: string,
+  signal?: AbortSignal,
+  onLog?: LogFn
 ): Promise<string> {
   const results = await summarizeFilesBatch(config, [
     { relativePath, content, extension }
-  ]);
-  
+  ], undefined, signal, onLog);
+
   const summary = results.summaries.get(relativePath);
   if (!summary) {
     throw new Error(results.errors[0] || `Failed to summarize ${relativePath}`);
@@ -100,29 +129,36 @@ export async function summarizeFile(
 export async function summarizeFilesBatch(
   config: ProviderConfig,
   files: FileToSummarize[],
-  onProgress?: (processed: number, total: number) => void
+  onProgress?: (processed: number, total: number) => void,
+  signal?: AbortSignal,
+  onLog?: LogFn
 ): Promise<BatchResult> {
+  // Check if already aborted
+  if (signal?.aborted) {
+    throw new DOMException('Summarization was aborted', 'AbortError');
+  }
+
   const client = createSummarizationClient(config);
   const summaries = new Map<string, string>();
   const errors: string[] = [];
-  
+
   // Prepare files with smart truncation
   const preparedFiles = files.map(f => ({
     ...f,
     truncatedContent: truncateContent(f.content, getSmartTruncateLimit(f.extension)),
     charCount: 0, // Will be set after truncation
   }));
-  
+
   // Calculate char counts
   for (const f of preparedFiles) {
     f.charCount = f.relativePath.length + f.truncatedContent.length + 200; // 200 for prompt overhead
   }
-  
+
   // Create batches
   const batches: typeof preparedFiles[] = [];
   let currentBatch: typeof preparedFiles = [];
   let currentBatchChars = 0;
-  
+
   for (const file of preparedFiles) {
     // If single file exceeds limit, it goes in its own batch
     if (file.charCount > MAX_BATCH_CHARS) {
@@ -134,7 +170,7 @@ export async function summarizeFilesBatch(
       batches.push([file]);
       continue;
     }
-    
+
     // Check if adding this file would exceed limits
     if (
       currentBatch.length >= MAX_FILES_PER_BATCH ||
@@ -150,54 +186,65 @@ export async function summarizeFilesBatch(
       currentBatchChars += file.charCount;
     }
   }
-  
+
   if (currentBatch.length > 0) {
     batches.push(currentBatch);
   }
-  
-  console.log(`[Memory] Summarizing ${files.length} files in ${batches.length} batches`);
-  
+
+  console.log(`[Memory] Summarizing ${files.length} files in ${batches.length} batches (1 file per request)`);
+  onLog?.('info', `[Memory] Summarizing ${files.length} files in ${batches.length} batches`);
+
   let processedFiles = 0;
-  
+
   // Process batches with rate limiting
   for (let i = 0; i < batches.length; i++) {
+    // Check if aborted before processing next batch
+    if (signal?.aborted) {
+      throw new DOMException('Summarization was aborted', 'AbortError');
+    }
+
     const batch = batches[i];
     let retries = 0;
     let delay = BASE_DELAY;
-    
+
     while (retries <= MAX_RETRIES) {
+      if (signal?.aborted) {
+        throw new DOMException('Summarization was aborted', 'AbortError');
+      }
       try {
-        const batchSummaries = await processBatch(client, batch);
-        
+        const batchSummaries = await processBatch(client, batch, onLog, signal);
+
         for (const [path, summary] of batchSummaries) {
           summaries.set(path, summary);
         }
-        
+
         processedFiles += batch.length;
         onProgress?.(processedFiles, files.length);
-        
+
         // Delay between batches to avoid rate limits
         if (i < batches.length - 1) {
-          await sleep(delay);
+          await sleepWithSignal(delay, signal);
         }
         break;
-        
+
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        
+
         // Check for rate limit error
         if (errMsg.includes('429') || errMsg.toLowerCase().includes('rate limit')) {
           retries++;
           if (retries <= MAX_RETRIES) {
             delay = delay * 2; // Exponential backoff
             console.warn(`[Memory] Rate limited, retry ${retries}/${MAX_RETRIES} after ${delay}ms`);
-            await sleep(delay);
+            onLog?.('warning', `[Memory] Rate limited, retry ${retries}/${MAX_RETRIES} after ${delay}ms`);
+            await sleepWithSignal(delay, signal);
             continue;
           }
         }
-        
+
         // Non-retryable error or max retries exceeded
         console.error(`[Memory] Batch ${i + 1} failed:`, errMsg);
+        onLog?.('error', `[Memory] Batch ${i + 1} failed: ${errMsg}`);
         for (const file of batch) {
           errors.push(`${file.relativePath}: ${errMsg}`);
         }
@@ -207,7 +254,7 @@ export async function summarizeFilesBatch(
       }
     }
   }
-  
+
   return { summaries, errors };
 }
 
@@ -216,15 +263,22 @@ export async function summarizeFilesBatch(
  */
 async function processBatch(
   client: LLMClient,
-  files: Array<{ relativePath: string; truncatedContent: string; extension: string }>
+  files: Array<{ relativePath: string; truncatedContent: string; extension: string }>,
+  onLog?: LogFn,
+  signal?: AbortSignal
 ): Promise<Map<string, string>> {
   const summaries = new Map<string, string>();
-  
+  if (signal?.aborted) {
+    throw new DOMException('Summarization was aborted', 'AbortError');
+  }
+
   // Single file - use simple prompt
   if (files.length === 1) {
     const file = files[0];
     const fileType = getFileType(file.extension);
-    
+    console.log(`[Memory] Summarizing ${file.relativePath}`);
+    onLog?.('info', `[Memory] Summarizing ${file.relativePath}`);
+
     const prompt = `Analyze this ${fileType} file. Reply with a brief summary (max 150 words).
 
 File: ${file.relativePath}
@@ -238,17 +292,19 @@ Format:
 **Key Elements**: Main exports/functions/classes (if any)
 **Purpose**: Why this file exists`;
 
+    onLog?.('info', `INPUT (${file.relativePath})\n${truncateForLog(prompt)}`);
     const response = await client.complete(
       'You are a code analysis assistant. Be concise and accurate.',
       prompt,
       512
     );
+    onLog?.('info', `OUTPUT (${file.relativePath})\n${truncateForLog(response || '')}`);
 
     const header = formatHeader(file.relativePath, fileType);
     summaries.set(file.relativePath, header + (response || ''));
     return summaries;
   }
-  
+
   // Multiple files - batch prompt
   const filesSection = files.map((f, idx) => {
     const fileType = getFileType(f.extension);
@@ -273,26 +329,27 @@ FORMAT (repeat for each file):
 
 Keep each summary under 100 words. Be concise.`;
 
+  onLog?.('info', `INPUT (batch)\n${truncateForLog(prompt)}`);
   const response = await client.complete(
     'You are a code analysis assistant. Be concise and accurate.',
     prompt,
     2048
   );
+  onLog?.('info', `OUTPUT (batch)\n${truncateForLog(response || '')}`);
 
   const responseText = response || '';
-  
   // Parse batched response - split by file headers
   for (const file of files) {
     const fileType = getFileType(file.extension);
     const fileName = file.relativePath.split('/').pop() || file.relativePath;
-    
+
     // Try to find this file's section in the response
     const fileSection = extractFileSection(responseText, fileName, file.relativePath);
     const header = formatHeader(file.relativePath, fileType);
-    
+
     summaries.set(file.relativePath, header + (fileSection || 'Summary not generated.'));
   }
-  
+
   return summaries;
 }
 
@@ -306,14 +363,14 @@ function extractFileSection(response: string, fileName: string, relativePath: st
     new RegExp(`###\\s*${escapeRegex(relativePath)}([\\s\\S]*?)(?=###|$)`, 'i'),
     new RegExp(`\\*\\*${escapeRegex(fileName)}\\*\\*([\\s\\S]*?)(?=\\*\\*[^*]+\\*\\*|###|$)`, 'i'),
   ];
-  
+
   for (const pattern of patterns) {
     const match = response.match(pattern);
     if (match && match[1]) {
       return match[1].trim();
     }
   }
-  
+
   // Fallback: if only one file or can't parse, return whole response
   return response;
 }
@@ -340,18 +397,22 @@ export async function summarizeDirectory(
   config: ProviderConfig,
   workspaceDir: string,
   files: FileInfo[],
-  entries: Record<string, ManifestEntry>
+  entries: Record<string, ManifestEntry>,
+  signal?: AbortSignal,
+  onLog?: LogFn
 ): Promise<string> {
+  if (signal?.aborted) {
+    throw new DOMException('Summarization was aborted', 'AbortError');
+  }
   const client = createSummarizationClient(config);
-  
   // Build directory tree
   const tree = buildDirectoryTree(files.map(f => f.relativePath));
-  
+
   // Get file type distribution
   const typeDistribution = getTypeDistribution(files);
-  
+
   // Read some key files for context (README, package.json, etc)
-  const keyFiles = files.filter(f => 
+  const keyFiles = files.filter(f =>
     f.relativePath.toLowerCase().includes('readme') ||
     f.relativePath === 'package.json' ||
     f.relativePath === 'Cargo.toml' ||
@@ -382,14 +443,15 @@ Create a concise project overview with:
 
 Keep it concise (under 300 words). This will be used as context for an AI assistant.`;
 
+  onLog?.('info', `INPUT (index)\n${truncateForLog(prompt)}`);
   const response = await client.complete(
     'You are a code analysis assistant. Be concise and accurate.',
     prompt,
     1024
   );
+  onLog?.('info', `OUTPUT (index)\n${truncateForLog(response || '')}`);
 
   const text = response || '';
-  
   const header = `# ${folderName} - Project Memory
 
 Last synced: ${new Date().toISOString()}
@@ -462,15 +524,15 @@ function getFileType(extension: string): string {
  */
 function truncateContent(content: string, maxChars: number): string {
   if (content.length <= maxChars) return content;
-  
+
   // Try to truncate at a reasonable boundary
   const truncated = content.slice(0, maxChars);
   const lastNewline = truncated.lastIndexOf('\n');
-  
+
   if (lastNewline > maxChars * 0.8) {
     return truncated.slice(0, lastNewline) + '\n\n... (truncated)';
   }
-  
+
   return truncated + '\n\n... (truncated)';
 }
 
@@ -479,7 +541,7 @@ function truncateContent(content: string, maxChars: number): string {
  */
 function buildDirectoryTree(paths: string[]): string {
   const dirs = new Set<string>();
-  
+
   for (const path of paths) {
     const parts = path.split('/');
     let current = '';
@@ -491,14 +553,14 @@ function buildDirectoryTree(paths: string[]): string {
 
   const sortedDirs = Array.from(dirs).sort();
   const lines: string[] = [];
-  
+
   for (const dir of sortedDirs.slice(0, 30)) {
     const depth = dir.split('/').length - 1;
     const indent = '  '.repeat(depth);
     const name = dir.split('/').pop();
     lines.push(`${indent}${name}/`);
   }
-  
+
   if (sortedDirs.length > 30) {
     lines.push(`... and ${sortedDirs.length - 30} more directories`);
   }
@@ -511,11 +573,11 @@ function buildDirectoryTree(paths: string[]): string {
  */
 function getTypeDistribution(files: FileInfo[]): Record<string, number> {
   const distribution: Record<string, number> = {};
-  
+
   for (const file of files) {
     distribution[file.extension] = (distribution[file.extension] || 0) + 1;
   }
-  
+
   // Sort by count descending
   return Object.fromEntries(
     Object.entries(distribution)

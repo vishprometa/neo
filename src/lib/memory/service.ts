@@ -20,6 +20,7 @@ const FILES_DIR = 'files';
 const JOURNAL_DIR = 'journal';
 const INDEX_FILE = 'index.md';
 const MANIFEST_FILE = 'manifest.json';
+const PROGRESS_FILE = 'progress.json';
 
 /** File extensions to analyze */
 const TEXT_EXTENSIONS = new Set([
@@ -71,6 +72,8 @@ export interface SyncProgress {
 }
 
 export type SyncProgressCallback = (progress: SyncProgress) => void;
+type LogLevel = 'info' | 'warning' | 'error' | 'success';
+type LogFn = (level: LogLevel, message: string) => void;
 
 /**
  * Get the .neomemory directory path for a workspace
@@ -105,7 +108,7 @@ export async function ensureMemoryDir(workspaceDir: string): Promise<string> {
  */
 async function loadManifest(memoryDir: string): Promise<Manifest> {
   const manifestPath = await join(memoryDir, MANIFEST_FILE);
-  
+
   if (await exists(manifestPath)) {
     try {
       const content = await readTextFile(manifestPath);
@@ -128,6 +131,21 @@ async function loadManifest(memoryDir: string): Promise<Manifest> {
 async function saveManifest(memoryDir: string, manifest: Manifest): Promise<void> {
   const manifestPath = await join(memoryDir, MANIFEST_FILE);
   await writeTextFile(manifestPath, JSON.stringify(manifest, null, 2));
+}
+
+interface SyncProgressState {
+  total: number;
+  indexed: number;
+  skipped: number;
+  errors: number;
+  indexedFiles: string[];
+  remainingFiles: string[];
+  lastUpdated: number;
+}
+
+async function saveProgress(memoryDir: string, state: SyncProgressState): Promise<void> {
+  const progressPath = await join(memoryDir, PROGRESS_FILE);
+  await writeTextFile(progressPath, JSON.stringify(state, null, 2));
 }
 
 /**
@@ -194,7 +212,7 @@ async function scanDirectory(
 
   onProgress?.({ phase: 'scanning', current: 0, total: 0 });
   await scan(workspaceDir);
-  
+
   return files;
 }
 
@@ -204,8 +222,14 @@ async function scanDirectory(
 export async function syncDirectory(
   workspaceDir: string,
   config: ProviderConfig,
-  onProgress?: SyncProgressCallback
+  onProgress?: SyncProgressCallback,
+  signal?: AbortSignal,
+  onLog?: LogFn
 ): Promise<{ indexed: number; skipped: number; errors: number }> {
+  // Check if already aborted
+  if (signal?.aborted) {
+    throw new DOMException('Sync operation was aborted', 'AbortError');
+  }
   let memoryDir: string;
   try {
     memoryDir = await ensureMemoryDir(workspaceDir);
@@ -216,6 +240,8 @@ export async function syncDirectory(
 
   const manifest = await loadManifest(memoryDir);
   const filesDir = await join(memoryDir, FILES_DIR);
+  console.log(`[Memory] Starting sync for ${workspaceDir}`);
+  onLog?.('info', `[Memory] Starting sync for ${workspaceDir}`);
 
   // Scan for files
   let files: FileInfo[];
@@ -226,13 +252,27 @@ export async function syncDirectory(
     throw new Error(`Failed to scan workspace: ${msg}`);
   }
 
+  // Check if aborted after scanning
+  if (signal?.aborted) {
+    throw new DOMException('Sync operation was aborted', 'AbortError');
+  }
+
   if (files.length === 0) {
     onProgress?.({ phase: 'complete', current: 0, total: 0 });
     manifest.lastSync = Date.now();
     await saveManifest(memoryDir, manifest);
+    await saveProgress(memoryDir, {
+      total: 0,
+      indexed: 0,
+      skipped: 0,
+      errors: 0,
+      indexedFiles: [],
+      remainingFiles: [],
+      lastUpdated: Date.now(),
+    });
     return { indexed: 0, skipped: 0, errors: 0 };
   }
-  
+
   let indexed = 0;
   let skipped = 0;
   let errors = 0;
@@ -257,6 +297,9 @@ export async function syncDirectory(
     }
   }
 
+  console.log(`[Memory] Files total: ${files.length}, to index: ${filesToProcess.length}`);
+  onLog?.('info', `[Memory] Files total: ${files.length}, to index: ${filesToProcess.length}`);
+
   onProgress?.({ phase: 'summarizing', current: 0, total: filesToProcess.length });
 
   // Read all file contents first
@@ -266,36 +309,85 @@ export async function syncDirectory(
   }> = [];
 
   for (const file of filesToProcess) {
+    // Check if aborted during file reading
+    if (signal?.aborted) {
+      throw new DOMException('Sync operation was aborted', 'AbortError');
+    }
+
     try {
       const content = await readTextFile(file.path);
       filesToSummarize.push({ file, content });
     } catch (err) {
       console.error(`Error reading ${file.relativePath}:`, err);
+      onLog?.('error', `[Memory] Error reading ${file.relativePath}`);
       errors++;
     }
   }
 
+  const indexedFiles: string[] = [];
+  const remainingFiles = new Set(filesToSummarize.map(({ file }) => file.relativePath));
+  await saveProgress(memoryDir, {
+    total: filesToSummarize.length,
+    indexed,
+    skipped: files.length - filesToProcess.length,
+    errors,
+    indexedFiles,
+    remainingFiles: Array.from(remainingFiles),
+    lastUpdated: Date.now(),
+  });
+
   // Batch summarize all files (handles rate limiting internally)
   if (filesToSummarize.length > 0) {
-    const batchResult = await summarizeFilesBatch(
-      config,
-      filesToSummarize.map(({ file, content }) => ({
-        relativePath: file.relativePath,
-        content,
-        extension: file.extension,
-      })),
-      (processed, total) => {
-        onProgress?.({
-          phase: 'summarizing',
-          current: processed,
-          total,
-          currentFile: filesToSummarize[Math.min(processed, filesToSummarize.length - 1)]?.file.relativePath,
-        });
+    let batchResult;
+    try {
+      batchResult = await summarizeFilesBatch(
+        config,
+        filesToSummarize.map(({ file, content }) => ({
+          relativePath: file.relativePath,
+          content,
+          extension: file.extension,
+        })),
+        (processed, total) => {
+          onProgress?.({
+            phase: 'summarizing',
+            current: processed,
+            total,
+            currentFile: filesToSummarize[Math.min(processed, filesToSummarize.length - 1)]?.file.relativePath,
+          });
+        },
+        signal,
+        onLog
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onLog?.('error', `[Memory] Summarization failed: ${msg}`);
+      await saveProgress(memoryDir, {
+        total: filesToSummarize.length,
+        indexed,
+        skipped: files.length - filesToProcess.length,
+        errors: errors + filesToSummarize.length,
+        indexedFiles,
+        remainingFiles: Array.from(remainingFiles),
+        lastUpdated: Date.now(),
+      });
+      throw err;
+    }
+
+    const errorByFile = new Map<string, string>();
+    for (const err of batchResult.errors) {
+      const splitIdx = err.indexOf(':');
+      if (splitIdx > 0) {
+        const path = err.slice(0, splitIdx).trim();
+        const message = err.slice(splitIdx + 1).trim();
+        errorByFile.set(path, message);
       }
-    );
+    }
 
     // Write summaries and update manifest
     for (const { file } of filesToSummarize) {
+      if (signal?.aborted) {
+        throw new DOMException('Sync operation was aborted', 'AbortError');
+      }
       const summary = batchResult.summaries.get(file.relativePath);
       if (summary) {
         try {
@@ -303,6 +395,7 @@ export async function syncDirectory(
           const memoryFilePath = await join(filesDir, memoryFileName);
 
           await writeTextFile(memoryFilePath, summary);
+          onLog?.('success', `[Memory] Saved summary for ${file.relativePath}`);
 
           manifest.entries[file.relativePath] = {
             path: file.relativePath,
@@ -312,13 +405,46 @@ export async function syncDirectory(
           };
 
           indexed++;
+          indexedFiles.push(file.relativePath);
+          remainingFiles.delete(file.relativePath);
         } catch (err) {
           console.error(`Error writing summary for ${file.relativePath}:`, err);
+          onLog?.('error', `[Memory] Error writing summary for ${file.relativePath}`);
           errors++;
         }
       } else {
         errors++;
+        const errorMessage = errorByFile.get(file.relativePath) || 'Summary not generated due to an unknown error.';
+        try {
+          const memoryFileName = slugifyPath(file.relativePath) + '.md';
+          const memoryFilePath = await join(filesDir, memoryFileName);
+          const stub = `# ${file.relativePath.split('/').pop()}
+Path: \`${file.relativePath}\`
+Type: ${file.extension.toUpperCase()}
+Indexed: ${new Date().toISOString()}
+
+---
+
+Summary not generated. Error:
+${errorMessage}
+`;
+          await writeTextFile(memoryFilePath, stub);
+          onLog?.('warning', `[Memory] Wrote error stub for ${file.relativePath}`);
+        } catch (err) {
+          console.error(`Error writing error stub for ${file.relativePath}:`, err);
+          onLog?.('error', `[Memory] Error writing error stub for ${file.relativePath}`);
+        }
       }
+
+      await saveProgress(memoryDir, {
+        total: filesToSummarize.length,
+        indexed,
+        skipped: files.length - filesToProcess.length,
+        errors,
+        indexedFiles,
+        remainingFiles: Array.from(remainingFiles),
+        lastUpdated: Date.now(),
+      });
     }
   }
 
@@ -332,12 +458,16 @@ export async function syncDirectory(
       config,
       workspaceDir,
       files,
-      manifest.entries
+      manifest.entries,
+      signal,
+      onLog
     );
     const indexPath = await join(memoryDir, INDEX_FILE);
     await writeTextFile(indexPath, indexContent);
   } catch (err) {
     console.error('Error generating index:', err);
+    const msg = err instanceof Error ? err.message : String(err);
+    onLog?.('error', `[Memory] Error generating index: ${msg}`);
     errors++;
   }
 
@@ -346,6 +476,16 @@ export async function syncDirectory(
   await saveManifest(memoryDir, manifest);
 
   onProgress?.({ phase: 'complete', current: indexed, total: files.length });
+
+  await saveProgress(memoryDir, {
+    total: filesToSummarize.length,
+    indexed,
+    skipped,
+    errors,
+    indexedFiles,
+    remainingFiles: Array.from(remainingFiles),
+    lastUpdated: Date.now(),
+  });
 
   return { indexed, skipped, errors };
 }
@@ -393,7 +533,7 @@ export async function loadMemoryContext(workspaceDir: string): Promise<string> {
 
       if (recentEntries.length > 0) {
         parts.push('\n## Recent Journal Entries\n');
-        
+
         for (const entry of recentEntries) {
           const entryPath = await join(journalDir, entry.name);
           try {
@@ -561,7 +701,7 @@ export async function getSyncStatus(workspaceDir: string): Promise<{
   }
 
   const manifest = await loadManifest(memoryDir);
-  
+
   return {
     initialized: true,
     lastSync: manifest.lastSync,

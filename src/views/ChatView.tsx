@@ -1,15 +1,19 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Brain, X } from 'lucide-react';
+import { Brain, X, FolderOpen, StopCircle } from 'lucide-react';
 import { Titlebar } from '../components/Titlebar';
 import { ChatInput } from '../components/ChatInput';
 import { MessageBlock } from '../components/MessageBlock';
 import { ThreadSidebar } from '../components/ThreadSidebar';
 import { DeleteThreadDialog } from '../components/DeleteThreadDialog';
 import { SyncStatus } from '../components/SyncStatus';
-import { useThreads, useChat, useMemorySync } from '../hooks';
-import type { Message, ModelType } from '../lib/agent';
+import { LogSidebar } from '../components/LogSidebar';
+import type { LogEntry } from '../hooks/useMemorySync';
+import { useThreads, useChat } from '../hooks';
+import type { SyncProgress } from '../lib/memory';
 import type { ProviderConfig } from '../lib/llm';
 import { getModelDisplayName } from '../lib/llm';
+import { open } from '@tauri-apps/plugin-shell';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 type SidebarTab = 'threads' | 'memory';
 
@@ -21,6 +25,13 @@ interface ChatViewProps {
   onNewWindow: () => void;
   error: string | null;
   setError: (error: string | null) => void;
+  logs: LogEntry[];
+  onLog: (entry: LogEntry) => void;
+  syncProgress: SyncProgress | null;
+  isSyncing: boolean;
+  memoryStatus: { initialized: boolean; lastSync: number; fileCount: number } | null;
+  resync: () => void;
+  stopSync: () => void;
 }
 
 export function ChatView({
@@ -31,11 +42,19 @@ export function ChatView({
   onNewWindow,
   error,
   setError,
+  logs,
+  onLog,
+  syncProgress,
+  isSyncing,
+  memoryStatus,
+  resync,
+  stopSync,
 }: ChatViewProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('threads');
   const [pendingDeleteThreadId, setPendingDeleteThreadId] = useState<string | null>(null);
-  
+  const [isLogSidebarOpen, setIsLogSidebarOpen] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Thread management
@@ -57,12 +76,42 @@ export function ChatView({
     cancelRename,
   } = useThreads(workspaceDir);
 
-  // Memory sync
-  const { syncProgress, isSyncing, memoryStatus, resync } = useMemorySync({
-    workspaceDir,
-    providerConfig,
-    onError: setError,
-  });
+  // Memory sync is managed in App and passed down.
+
+  // Handler for opening Neo memory folder
+  const handleOpenNeoMemory = useCallback(async () => {
+    try {
+      const memoryPath = `${workspaceDir}/.neomemory`;
+      await open(memoryPath);
+      onLog({
+        id: `${Date.now()}-${Math.random()}`,
+        timestamp: Date.now(),
+        level: 'info',
+        message: `Opened Neo memory folder: ${memoryPath}`,
+      });
+    } catch (err) {
+      setError(`Failed to open Neo memory folder: ${(err as Error).message}`);
+    }
+  }, [workspaceDir, onLog, setError]);
+
+  const handleOpenLogsWindow = useCallback(() => {
+    const label = `neo-logs-${Date.now()}`;
+    const win = new WebviewWindow(label, {
+      url: '/?logs=1',
+      title: 'Neo Logs',
+      width: 600,
+      height: 800,
+      resizable: true,
+    });
+    win.once('tauri://error', (e) => {
+      onLog({
+        id: `${Date.now()}-${Math.random()}`,
+        timestamp: Date.now(),
+        level: 'error',
+        message: `Failed to open logs window: ${String(e)}`,
+      });
+    });
+  }, [onLog]);
 
   // Chat
   const {
@@ -171,9 +220,42 @@ export function ChatView({
             {toolCallCount > 0 && (
               <span className="chat-header-badge">{toolCallCount} tool calls</span>
             )}
-            <button className="chat-header-action" onClick={resync} disabled={isSyncing} title="Index workspace files">
-              <Brain size={12} className={isSyncing ? 'animate-pulse' : ''} />
-              {isSyncing ? 'Indexing...' : 'Index Files'}
+            {isSyncing ? (
+              <button
+                className="chat-header-action chat-header-action-stop"
+                onClick={stopSync}
+                title="Stop indexing"
+              >
+                <StopCircle size={12} />
+                Stop Indexing
+              </button>
+            ) : (
+              <button className="chat-header-action" onClick={resync} title="Index workspace files">
+                <Brain size={12} />
+                Index Files
+              </button>
+            )}
+            <button
+              className="chat-header-action"
+              onClick={handleOpenNeoMemory}
+              title="Open Neo memory folder"
+            >
+              <FolderOpen size={12} />
+              Open Memory
+            </button>
+            <button
+              className="chat-header-action"
+              onClick={() => setIsLogSidebarOpen(prev => !prev)}
+              title="Toggle logs"
+            >
+              Logs {isLogSidebarOpen ? '▼' : '▶'}
+            </button>
+            <button
+              className="chat-header-action"
+              onClick={handleOpenLogsWindow}
+              title="Open logs in a new window"
+            >
+              Open Logs Window
             </button>
           </div>
 
@@ -257,6 +339,12 @@ export function ChatView({
       />
 
       {isSyncing && syncProgress && <SyncStatus progress={syncProgress} />}
+
+      <LogSidebar
+        isOpen={isLogSidebarOpen}
+        logs={logs}
+        onClose={() => setIsLogSidebarOpen(false)}
+      />
     </>
   );
 }
