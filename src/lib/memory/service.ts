@@ -245,15 +245,14 @@ export async function syncDirectory(
   // Validate API key with a quick test if there are files to process
   if (filesToProcess.length > 0) {
     try {
-      const { GoogleGenAI } = await import('@google/genai');
-      const testClient = new GoogleGenAI({ apiKey });
-      await testClient.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [{ role: 'user', parts: [{ text: 'Reply with OK' }] }],
-      });
+      const { validateApiKey } = await import('../openrouter');
+      const isValid = await validateApiKey(apiKey);
+      if (!isValid) {
+        throw new Error('API key validation failed');
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : JSON.stringify(err);
-      throw new Error(`Gemini API key is invalid or API is unreachable: ${msg}`);
+      throw new Error(`OpenRouter API key is invalid or API is unreachable: ${msg}`);
     }
   }
 

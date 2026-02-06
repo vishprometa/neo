@@ -3,10 +3,10 @@ use std::path::PathBuf;
 
 use tauri_plugin_fs::FsExt;
 
-/// Get the Gemini API key from environment variables
+/// Get the OpenRouter API key from environment variables
 #[tauri::command]
-fn get_gemini_api_key() -> Result<String, String> {
-    env::var("GEMINI_API_KEY").map_err(|_| "GEMINI_API_KEY not set in environment".to_string())
+fn get_openrouter_api_key() -> Result<String, String> {
+    env::var("OPENROUTER_API_KEY").map_err(|_| "OPENROUTER_API_KEY not set in environment".to_string())
 }
 
 /// Allow Neo to access a user-selected workspace directory.
@@ -50,7 +50,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![get_gemini_api_key, allow_workspace_dir])
+        .invoke_handler(tauri::generate_handler![get_openrouter_api_key, allow_workspace_dir])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

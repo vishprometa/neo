@@ -62,7 +62,7 @@ export function useMemorySync({ workspaceDir, apiKey, onError }: UseMemorySyncOp
       return;
     }
     if (!apiKey) {
-      onError('Set your Gemini API key in Settings before indexing.');
+      onError('Set your OpenRouter API key in Settings before indexing.');
       return;
     }
     setIsSyncing(true);

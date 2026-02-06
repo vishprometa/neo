@@ -1,13 +1,13 @@
 /**
  * LLM-based file summarization for Neo memory system
- * Uses Gemini to generate semantic summaries of files
+ * Uses OpenRouter API with Google Gemini models
  * 
  * Optimized for rate limits:
  * - Batches multiple small files into single API calls
  * - Smart content truncation based on file type
  * - Exponential backoff on rate limit errors
  */
-import { GoogleGenAI } from '@google/genai';
+import { OpenRouterClient, MODELS } from '../openrouter';
 import type { FileInfo, ManifestEntry } from './service';
 
 /** Maximum tokens per batch (conservative estimate: 4 chars = 1 token) */
@@ -73,7 +73,7 @@ function getSmartTruncateLimit(extension: string): number {
 }
 
 /**
- * Summarize a single file using Gemini
+ * Summarize a single file using OpenRouter
  * This is the public API - internally uses batching when called via summarizeFilesBatch
  */
 export async function summarizeFile(
@@ -102,7 +102,7 @@ export async function summarizeFilesBatch(
   files: FileToSummarize[],
   onProgress?: (processed: number, total: number) => void
 ): Promise<BatchResult> {
-  const client = new GoogleGenAI({ apiKey });
+  const client = new OpenRouterClient(apiKey, MODELS.GEMINI_3_FLASH);
   const summaries = new Map<string, string>();
   const errors: string[] = [];
   
@@ -215,7 +215,7 @@ export async function summarizeFilesBatch(
  * Process a single batch of files
  */
 async function processBatch(
-  client: GoogleGenAI,
+  client: OpenRouterClient,
   files: Array<{ relativePath: string; truncatedContent: string; extension: string }>
 ): Promise<Map<string, string>> {
   const summaries = new Map<string, string>();
@@ -238,13 +238,14 @@ Format:
 **Key Elements**: Main exports/functions/classes (if any)
 **Purpose**: Why this file exists`;
 
-    const response = await client.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    });
+    const response = await client.complete(
+      'You are a code analysis assistant. Be concise and accurate.',
+      prompt,
+      512
+    );
 
     const header = formatHeader(file.relativePath, fileType);
-    summaries.set(file.relativePath, header + (response.text || ''));
+    summaries.set(file.relativePath, header + (response || ''));
     return summaries;
   }
   
@@ -272,12 +273,13 @@ FORMAT (repeat for each file):
 
 Keep each summary under 100 words. Be concise.`;
 
-  const response = await client.models.generateContent({
-    model: 'gemini-2.0-flash',
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-  });
+  const response = await client.complete(
+    'You are a code analysis assistant. Be concise and accurate.',
+    prompt,
+    2048
+  );
 
-  const responseText = response.text || '';
+  const responseText = response || '';
   
   // Parse batched response - split by file headers
   for (const file of files) {
@@ -340,7 +342,7 @@ export async function summarizeDirectory(
   files: FileInfo[],
   entries: Record<string, ManifestEntry>
 ): Promise<string> {
-  const client = new GoogleGenAI({ apiKey });
+  const client = new OpenRouterClient(apiKey, MODELS.GEMINI_3_FLASH);
   
   // Build directory tree
   const tree = buildDirectoryTree(files.map(f => f.relativePath));
@@ -380,12 +382,13 @@ Create a concise project overview with:
 
 Keep it concise (under 300 words). This will be used as context for an AI assistant.`;
 
-  const response = await client.models.generateContent({
-    model: 'gemini-2.0-flash',
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-  });
+  const response = await client.complete(
+    'You are a code analysis assistant. Be concise and accurate.',
+    prompt,
+    1024
+  );
 
-  const text = response.text || '';
+  const text = response || '';
   
   const header = `# ${folderName} - Project Memory
 

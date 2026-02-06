@@ -12,7 +12,7 @@ function App() {
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(() => {
-    return localStorage.getItem('neo_gemini_api_key');
+    return localStorage.getItem('neo_openrouter_api_key');
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -70,7 +70,7 @@ function App() {
 
   // Save API key
   const handleSaveApiKey = useCallback((key: string) => {
-    localStorage.setItem('neo_gemini_api_key', key);
+    localStorage.setItem('neo_openrouter_api_key', key);
     setApiKey(key);
     setShowSettings(false);
   }, []);

@@ -67,7 +67,7 @@ export function Settings({ currentApiKey, onSave, onCancel, theme, onThemeChange
         <div className="settings-section">
           <label className="settings-label" htmlFor="apiKey">
             <Key size={12} style={{ display: 'inline', marginRight: '6px' }} />
-            Gemini API Key
+            OpenRouter API Key
           </label>
           <div style={{ position: 'relative' }}>
             <input
@@ -75,7 +75,7 @@ export function Settings({ currentApiKey, onSave, onCancel, theme, onThemeChange
               type={showKey ? 'text' : 'password'}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter your Gemini API key"
+              placeholder="Enter your OpenRouter API key (sk-or-v1-...)"
               className="settings-input"
               style={{ paddingRight: '36px' }}
             />
@@ -99,13 +99,14 @@ export function Settings({ currentApiKey, onSave, onCancel, theme, onThemeChange
           <p style={{ fontSize: '11px', color: 'hsl(var(--muted-foreground))', marginTop: '6px' }}>
             Get your API key from{' '}
             <a 
-              href="https://aistudio.google.com/apikey" 
+              href="https://openrouter.ai/keys" 
               target="_blank" 
               rel="noopener noreferrer"
               style={{ color: 'hsl(212 92% 55%)', textDecoration: 'none' }}
             >
-              Google AI Studio <ExternalLink size={10} style={{ display: 'inline' }} />
+              OpenRouter <ExternalLink size={10} style={{ display: 'inline' }} />
             </a>
+            {' '}(uses Google Gemini models)
           </p>
         </div>
 

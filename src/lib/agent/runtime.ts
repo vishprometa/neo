@@ -1,17 +1,21 @@
 /**
  * Agent runtime for Neo coding assistant
- * Block-based streaming architecture inspired by erpai-cli
+ * Block-based streaming architecture using OpenRouter API
  */
-import type { Part, FunctionDeclaration, Type } from '@google/genai';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { GeminiClient, type GeminiMessage, type StreamDelta } from '../gemini/client';
+import {
+  OpenRouterClient,
+  MODELS,
+  type OpenRouterMessage,
+  type OpenRouterTool,
+  type OpenRouterStreamDelta,
+} from '../openrouter';
 import { registry } from './registry';
 import { registerTools } from './tools';
 import { buildSystemPrompt } from './system-prompt';
 import { loadMemoryContext, createContextManager, type ContextManager } from '../memory';
 import { detectLoop, getLoopSuggestion } from './loop-detection';
 import { compressConversation, needsCompression } from './compression';
-// ToolContext types are re-exported from ./types
 import type {
   AgentEvent,
   AgentEventHandler,
@@ -29,17 +33,21 @@ export type { AgentEvent, AgentEventHandler } from './types';
 
 export type ModelType = 'fast' | 'thinking';
 
+/** Map model types to OpenRouter model IDs */
 const MODEL_MAP: Record<ModelType, string> = {
-  fast: 'gemini-2.5-flash',
-  thinking: 'gemini-2.5-pro',
+  fast: MODELS.GEMINI_3_FLASH,
+  thinking: MODELS.GEMINI_3_PRO,
 };
 
+/** Message format for history (OpenRouter compatible) */
+export type ChatMessage = OpenRouterMessage;
+
 export class AgentRuntime {
-  private client: GeminiClient;
+  private client: OpenRouterClient;
   private apiKey: string;
   private workspaceDir: string;
   private sessionId: string;
-  private history: GeminiMessage[] = [];
+  private history: ChatMessage[] = [];
   private initialized = false;
   private eventHandler?: AgentEventHandler;
   private memoryContext: string = '';
@@ -47,7 +55,7 @@ export class AgentRuntime {
   private modelType: ModelType = 'fast';
 
   constructor(apiKey: string, workspaceDir: string, sessionId?: string) {
-    this.client = new GeminiClient(apiKey, MODEL_MAP['fast']);
+    this.client = new OpenRouterClient(apiKey, MODEL_MAP['fast']);
     this.apiKey = apiKey;
     this.workspaceDir = workspaceDir;
     this.sessionId = sessionId || `session_${Date.now()}`;
@@ -104,7 +112,7 @@ export class AgentRuntime {
     }
   }
 
-  private getToolDefinitions(): FunctionDeclaration[] {
+  private getToolDefinitions(): OpenRouterTool[] {
     const tools = registry.all();
     return tools.map((tool) => {
       const jsonSchema = zodToJsonSchema(tool.parameters as any, { name: tool.id });
@@ -112,12 +120,15 @@ export class AgentRuntime {
       const schema = (jsonSchema as any).definitions?.[tool.id] || jsonSchema;
       
       return {
-        name: tool.id,
-        description: tool.description,
-        parameters: {
-          type: 'OBJECT' as Type,
-          properties: schema.properties || {},
-          required: schema.required || [],
+        type: 'function' as const,
+        function: {
+          name: tool.id,
+          description: tool.description,
+          parameters: {
+            type: 'object',
+            properties: schema.properties || {},
+            required: schema.required || [],
+          },
         },
       };
     });
@@ -131,7 +142,7 @@ export class AgentRuntime {
       // Add user message to history
       this.history.push({
         role: 'user',
-        parts: [{ text: content }],
+        content: content,
       });
 
       await this.runLoop(signal);
@@ -166,9 +177,9 @@ export class AgentRuntime {
         systemPrompt,
         this.history,
         tools,
-        (delta: StreamDelta) => {
-          if (delta.text) {
-            streamedText += delta.text;
+        (delta: OpenRouterStreamDelta) => {
+          if (delta.content) {
+            streamedText += delta.content;
             
             // Create or update text block
             if (!textBlockId) {
@@ -180,15 +191,23 @@ export class AgentRuntime {
           }
           
           // Surface tool call intent early (as the model streams)
-          if (delta.functionCalls) {
-            for (const fc of delta.functionCalls) {
-              // Emit tool call block with 'pending' status
-              this.emitBlock(createToolCallBlock(
-                `tool_call_${fc.id}`,
-                fc.name,
-                fc.args,
-                'pending'
-              ));
+          if (delta.toolCalls) {
+            for (const tc of delta.toolCalls) {
+              if (tc.id && tc.function.name) {
+                let args: Record<string, unknown> = {};
+                try {
+                  args = JSON.parse(tc.function.arguments || '{}');
+                } catch {
+                  // Arguments still streaming, ignore parse errors
+                }
+                // Emit tool call block with 'pending' status
+                this.emitBlock(createToolCallBlock(
+                  `tool_call_${tc.id}`,
+                  tc.function.name,
+                  args,
+                  'pending'
+                ));
+              }
             }
           }
         },
@@ -199,35 +218,31 @@ export class AgentRuntime {
       if (result.functionCalls.length === 0) {
         if (streamedText.trim()) {
           this.history.push({
-            role: 'model',
-            parts: [{ text: streamedText }],
+            role: 'assistant',
+            content: streamedText,
           });
         }
         return;
       }
 
-      // Process function calls
-      const modelParts: Part[] = [];
-      if (streamedText.trim()) {
-        modelParts.push({ text: streamedText });
-      }
-      
-      for (const fc of result.functionCalls) {
-        modelParts.push({
-          functionCall: {
-            name: fc.name,
-            args: fc.args,
-          },
-        });
-      }
-      
+      // Process function calls - add assistant message with tool calls
+      const toolCalls = result.functionCalls.map((fc) => ({
+        id: fc.id,
+        type: 'function' as const,
+        function: {
+          name: fc.name,
+          arguments: JSON.stringify(fc.args),
+        },
+      }));
+
       this.history.push({
-        role: 'model',
-        parts: modelParts,
+        role: 'assistant',
+        content: streamedText || '',
+        tool_calls: toolCalls,
       });
 
       // Execute tools in parallel where safe
-      const responseParts: Part[] = [];
+      const toolResponses: ChatMessage[] = [];
       
       // Categorize tools for execution strategy
       const readOnlyTools = new Set(['read', 'ls', 'glob', 'grep', 'read_memory', 'search_memory', 'list_memory', 'list_skills']);
@@ -242,22 +257,18 @@ export class AgentRuntime {
       });
       
       const parallelResults = await Promise.all(parallelPromises);
-      
-      for (const partResult of parallelResults) {
-        responseParts.push(partResult);
-      }
+      toolResponses.push(...parallelResults);
       
       // Execute write tools sequentially
       for (const fc of sequentialCalls) {
-        const partResult = await this.executeToolCall(fc, signal);
-        responseParts.push(partResult);
+        const response = await this.executeToolCall(fc, signal);
+        toolResponses.push(response);
       }
 
       // Add tool responses to history
-      this.history.push({
-        role: 'user',
-        parts: responseParts,
-      });
+      for (const response of toolResponses) {
+        this.history.push(response);
+      }
 
       // Loop detection
       const loopResult = detectLoop(this.history);
@@ -266,7 +277,7 @@ export class AgentRuntime {
         const suggestion = getLoopSuggestion(loopResult.loopType || 'tool_repeat');
         this.history.push({
           role: 'user',
-          parts: [{ text: `[SYSTEM WARNING] ${loopResult.description}\n\n${suggestion}` }],
+          content: `[SYSTEM WARNING] ${loopResult.description}\n\n${suggestion}`,
         });
       }
 
@@ -292,7 +303,7 @@ export class AgentRuntime {
   private async executeToolCall(
     fc: { id: string; name: string; args: Record<string, unknown> },
     signal?: AbortSignal
-  ): Promise<Part> {
+  ): Promise<ChatMessage> {
     const tool = registry.get(fc.name);
     const toolCallBlockId = `tool_call_${fc.id}`;
     const toolResultBlockId = `tool_result_${fc.id}`;
@@ -302,10 +313,9 @@ export class AgentRuntime {
       this.emitBlock(createToolCallBlock(toolCallBlockId, fc.name, fc.args, 'error'));
       this.emitBlock(createToolResultBlock(toolResultBlockId, '', fc.name, 'error', undefined, error));
       return {
-        functionResponse: {
-          name: fc.name,
-          response: { error },
-        },
+        role: 'tool',
+        tool_call_id: fc.id,
+        content: JSON.stringify({ error }),
       };
     }
 
@@ -345,10 +355,9 @@ export class AgentRuntime {
       ));
 
       return {
-        functionResponse: {
-          name: fc.name,
-          response: { result: toolResult.output },
-        },
+        role: 'tool',
+        tool_call_id: fc.id,
+        content: JSON.stringify({ result: toolResult.output }),
       };
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
@@ -365,10 +374,9 @@ export class AgentRuntime {
       ));
 
       return {
-        functionResponse: {
-          name: fc.name,
-          response: { error },
-        },
+        role: 'tool',
+        tool_call_id: fc.id,
+        content: JSON.stringify({ error }),
       };
     }
   }
@@ -377,7 +385,7 @@ export class AgentRuntime {
     this.history = [];
   }
 
-  getHistory(): GeminiMessage[] {
+  getHistory(): ChatMessage[] {
     return [...this.history];
   }
 }

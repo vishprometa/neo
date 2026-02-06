@@ -164,7 +164,7 @@ export function ChatView({
         <div className="chat-container">
           <div className="chat-header">
             <span className="chat-header-badge">
-              {selectedModel === 'thinking' ? 'Gemini 2.5 Pro' : 'Gemini 2.5 Flash'}
+              {selectedModel === 'thinking' ? 'Gemini 3 Pro' : 'Gemini 3 Flash'}
             </span>
             <span className="chat-header-badge">{messages.length} messages</span>
             {toolCallCount > 0 && (

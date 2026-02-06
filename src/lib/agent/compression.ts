@@ -4,12 +4,12 @@
  * Inspired by gemini-cli's ChatCompressionService
  */
 
-import type { GeminiMessage } from '../gemini/client';
-import { GeminiClient } from '../gemini/client';
+import type { OpenRouterMessage } from '../openrouter';
+import { OpenRouterClient, MODELS } from '../openrouter';
 
 export interface CompressionResult {
   /** Compressed messages */
-  messages: GeminiMessage[];
+  messages: OpenRouterMessage[];
   /** Number of messages before compression */
   originalCount: number;
   /** Number of messages after compression */
@@ -37,7 +37,7 @@ const DEFAULT_PRESERVE_RECENT = 5;
  * Compress conversation history
  */
 export async function compressConversation(
-  messages: GeminiMessage[],
+  messages: OpenRouterMessage[],
   config: CompressionConfig
 ): Promise<CompressionResult> {
   const maxMessages = config.maxMessages ?? DEFAULT_MAX_MESSAGES;
@@ -69,11 +69,9 @@ export async function compressConversation(
   const summary = await generateConversationSummary(toCompress, config.apiKey);
 
   // Create compressed message
-  const compressedMessage: GeminiMessage = {
+  const compressedMessage: OpenRouterMessage = {
     role: 'user',
-    parts: [{
-      text: `[CONVERSATION SUMMARY]\n\nThe following is a summary of the earlier conversation:\n\n${summary}\n\n[END SUMMARY]\n\nPlease continue the conversation considering this context.`,
-    }],
+    content: `[CONVERSATION SUMMARY]\n\nThe following is a summary of the earlier conversation:\n\n${summary}\n\n[END SUMMARY]\n\nPlease continue the conversation considering this context.`,
   };
 
   const compressedMessages = [compressedMessage, ...recentMessages];
@@ -90,25 +88,27 @@ export async function compressConversation(
  * Generate a summary of conversation messages
  */
 async function generateConversationSummary(
-  messages: GeminiMessage[],
+  messages: OpenRouterMessage[],
   apiKey: string
 ): Promise<string> {
-  const client = new GeminiClient(apiKey, 'gemini-2.0-flash-lite');
+  const client = new OpenRouterClient(apiKey, MODELS.GEMINI_2_5_FLASH_LITE);
 
   // Format messages for summarization
   const formattedMessages = messages.map((msg) => {
-    const role = msg.role === 'user' ? 'User' : 'Assistant';
-    const parts = msg.parts.map((part) => {
-      if ('text' in part) return part.text;
-      if ('functionCall' in part) {
-        return `[Called tool: ${part.functionCall.name}]`;
-      }
-      if ('functionResponse' in part) {
-        return `[Tool response: ${part.functionResponse.name}]`;
-      }
-      return '[Unknown part]';
-    }).join('\n');
-    return `${role}: ${parts}`;
+    const role = msg.role === 'user' ? 'User' : msg.role === 'assistant' ? 'Assistant' : 'Tool';
+    
+    let content = '';
+    if (typeof msg.content === 'string') {
+      content = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      content = msg.content.map((part) => part.text || '[non-text]').join('\n');
+    }
+    
+    if (msg.tool_calls) {
+      content += `\n[Called tools: ${msg.tool_calls.map((tc) => tc.function.name).join(', ')}]`;
+    }
+    
+    return `${role}: ${content}`;
   }).join('\n\n');
 
   const summaryPrompt = `Please summarize the following conversation between a user and an AI coding assistant. 
@@ -123,23 +123,20 @@ Keep the summary concise but comprehensive (200-400 words).
 Conversation:
 ${formattedMessages}`;
 
-  const result = await client.streamChat(
+  const result = await client.complete(
     'You are a helpful assistant that summarizes conversations accurately and concisely.',
-    [{
-      role: 'user',
-      parts: [{ text: summaryPrompt }],
-    }],
-    [],
+    summaryPrompt,
+    1024
   );
 
-  return result.text || 'Unable to generate summary.';
+  return result || 'Unable to generate summary.';
 }
 
 /**
  * Check if conversation needs compression
  */
 export function needsCompression(
-  messages: GeminiMessage[],
+  messages: OpenRouterMessage[],
   maxMessages: number = DEFAULT_MAX_MESSAGES
 ): boolean {
   return messages.length > maxMessages;
@@ -148,17 +145,20 @@ export function needsCompression(
 /**
  * Estimate token count for messages (rough estimate)
  */
-export function estimateTokens(messages: GeminiMessage[]): number {
+export function estimateTokens(messages: OpenRouterMessage[]): number {
   let chars = 0;
   for (const msg of messages) {
-    for (const part of msg.parts) {
-      if ('text' in part) {
-        chars += part.text.length;
-      } else if ('functionCall' in part) {
-        chars += JSON.stringify(part.functionCall).length;
-      } else if ('functionResponse' in part) {
-        chars += JSON.stringify(part.functionResponse).length;
+    if (typeof msg.content === 'string') {
+      chars += msg.content.length;
+    } else if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (part.text) {
+          chars += part.text.length;
+        }
       }
+    }
+    if (msg.tool_calls) {
+      chars += JSON.stringify(msg.tool_calls).length;
     }
   }
   // Rough estimate: 4 characters per token

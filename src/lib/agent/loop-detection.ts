@@ -4,7 +4,7 @@
  * Inspired by gemini-cli's loopDetectionService
  */
 
-import type { GeminiMessage } from '../gemini/client';
+import type { OpenRouterMessage } from '../openrouter';
 
 export interface LoopDetectionResult {
   /** Whether a loop was detected */
@@ -34,17 +34,17 @@ const DEFAULT_SIMILARITY_THRESHOLD = 0.85;
 const DEFAULT_MAX_CONSECUTIVE_ERRORS = 3;
 
 /**
- * Extract tool calls from messages
+ * Extract tool calls from messages (OpenRouter format)
  */
-function extractToolCalls(messages: GeminiMessage[]): Array<{ name: string; args: string }> {
+function extractToolCalls(messages: OpenRouterMessage[]): Array<{ name: string; args: string }> {
   const toolCalls: Array<{ name: string; args: string }> = [];
 
   for (const msg of messages) {
-    for (const part of msg.parts) {
-      if ('functionCall' in part) {
+    if (msg.role === 'assistant' && msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
         toolCalls.push({
-          name: part.functionCall.name,
-          args: JSON.stringify(part.functionCall.args),
+          name: tc.function.name,
+          args: tc.function.arguments,
         });
       }
     }
@@ -54,18 +54,20 @@ function extractToolCalls(messages: GeminiMessage[]): Array<{ name: string; args
 }
 
 /**
- * Extract errors from messages
+ * Extract errors from tool response messages (OpenRouter format)
  */
-function extractErrors(messages: GeminiMessage[]): string[] {
+function extractErrors(messages: OpenRouterMessage[]): string[] {
   const errors: string[] = [];
 
   for (const msg of messages) {
-    for (const part of msg.parts) {
-      if ('functionResponse' in part) {
-        const response = part.functionResponse.response as { error?: string };
-        if (response?.error) {
-          errors.push(response.error);
+    if (msg.role === 'tool' && typeof msg.content === 'string') {
+      try {
+        const parsed = JSON.parse(msg.content);
+        if (parsed?.error) {
+          errors.push(parsed.error);
         }
+      } catch {
+        // Not JSON, ignore
       }
     }
   }
@@ -165,7 +167,7 @@ function checkErrorLoop(
  * Detect loops in conversation
  */
 export function detectLoop(
-  messages: GeminiMessage[],
+  messages: OpenRouterMessage[],
   config: LoopDetectionConfig = {}
 ): LoopDetectionResult {
   const minMessages = config.minMessages ?? DEFAULT_MIN_MESSAGES;

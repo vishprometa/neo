@@ -74,7 +74,7 @@ export function WelcomeView({
         {!apiKey && (
           <div className="welcome-warning">
             <AlertCircle size={14} />
-            <span>Configure your Gemini API key in settings to get started.</span>
+            <span>Configure your OpenRouter API key in settings to get started.</span>
           </div>
         )}
 
