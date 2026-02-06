@@ -5,16 +5,29 @@ import { WelcomeView } from './views/WelcomeView';
 import { ChatView } from './views/ChatView';
 import { useTheme, useFolderPicker, useKeyboardShortcuts, useWindowFocus, useMemorySync } from './hooks';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import type { LLMProvider, ProviderConfig } from './lib/llm';
 import './App.css';
+
+const STORAGE_KEY_API_KEY = 'neo_api_key';
+const STORAGE_KEY_PROVIDER = 'neo_provider';
 
 function App() {
   // Core state
   const [workspaceDir, setWorkspaceDir] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(() => {
-    return localStorage.getItem('neo_openrouter_api_key');
+    return localStorage.getItem(STORAGE_KEY_API_KEY);
+  });
+  const [provider, setProvider] = useState<LLMProvider>(() => {
+    const stored = localStorage.getItem(STORAGE_KEY_PROVIDER);
+    return (stored === 'gemini' || stored === 'openrouter') ? stored : 'gemini';
   });
   const [error, setError] = useState<string | null>(null);
+
+  // Provider config for use by other components
+  const providerConfig: ProviderConfig | null = apiKey 
+    ? { provider, apiKey } 
+    : null;
 
   // Hooks
   const { theme, setTheme } = useTheme();
@@ -23,7 +36,7 @@ function App() {
   // Memory sync (for initial sync on folder open)
   const { syncOnOpen } = useMemorySync({
     workspaceDir,
-    apiKey,
+    providerConfig,
     onError: setError,
   });
 
@@ -68,10 +81,12 @@ function App() {
     onNewWindow: handleNewWindow,
   });
 
-  // Save API key
-  const handleSaveApiKey = useCallback((key: string) => {
-    localStorage.setItem('neo_openrouter_api_key', key);
+  // Save API key and provider
+  const handleSaveSettings = useCallback((key: string, newProvider: LLMProvider) => {
+    localStorage.setItem(STORAGE_KEY_API_KEY, key);
+    localStorage.setItem(STORAGE_KEY_PROVIDER, newProvider);
     setApiKey(key);
+    setProvider(newProvider);
     setShowSettings(false);
   }, []);
 
@@ -82,7 +97,8 @@ function App() {
         <Titlebar isFocused={isFocused} onNewWindow={handleNewWindow} />
         <Settings
           currentApiKey={apiKey}
-          onSave={handleSaveApiKey}
+          currentProvider={provider}
+          onSave={handleSaveSettings}
           onCancel={() => setShowSettings(false)}
           theme={theme}
           onThemeChange={setTheme}
@@ -98,6 +114,7 @@ function App() {
         <Titlebar isFocused={isFocused} onNewWindow={handleNewWindow} />
         <WelcomeView
           apiKey={apiKey}
+          provider={provider}
           theme={theme}
           onThemeChange={setTheme}
           onOpenSettings={() => setShowSettings(true)}
@@ -114,7 +131,7 @@ function App() {
     <div className={`app-container ${isFocused ? 'focused' : 'unfocused'}`}>
       <ChatView
         workspaceDir={workspaceDir}
-        apiKey={apiKey!}
+        providerConfig={providerConfig!}
         isFocused={isFocused}
         onOpenSettings={() => setShowSettings(true)}
         onNewWindow={handleNewWindow}

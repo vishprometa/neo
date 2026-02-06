@@ -80,9 +80,10 @@ export interface ToolContext {
   signal: AbortSignal;
 }
 
-// Extended tool context with API key for memory tools
+// Extended tool context with provider config for memory tools
 export interface ExtendedToolContext extends ToolContext {
   apiKey: string;
+  provider: 'gemini' | 'openrouter';
 }
 
 // Tool result

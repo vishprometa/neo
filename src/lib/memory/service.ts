@@ -11,7 +11,9 @@ import {
   stat,
 } from '@tauri-apps/plugin-fs';
 import { join } from '@tauri-apps/api/path';
-import { summarizeFile, summarizeFilesBatch, summarizeDirectory } from './summarizer';
+import { summarizeFilesBatch, summarizeDirectory } from './summarizer';
+import type { ProviderConfig } from '../llm';
+import { validateApiKey, getProviderDisplayName } from '../llm';
 
 const MEMORY_DIR = '.neomemory';
 const FILES_DIR = 'files';
@@ -201,7 +203,7 @@ async function scanDirectory(
  */
 export async function syncDirectory(
   workspaceDir: string,
-  apiKey: string,
+  config: ProviderConfig,
   onProgress?: SyncProgressCallback
 ): Promise<{ indexed: number; skipped: number; errors: number }> {
   let memoryDir: string;
@@ -245,14 +247,13 @@ export async function syncDirectory(
   // Validate API key with a quick test if there are files to process
   if (filesToProcess.length > 0) {
     try {
-      const { validateApiKey } = await import('../openrouter');
-      const isValid = await validateApiKey(apiKey);
+      const isValid = await validateApiKey(config.provider, config.apiKey);
       if (!isValid) {
         throw new Error('API key validation failed');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : JSON.stringify(err);
-      throw new Error(`OpenRouter API key is invalid or API is unreachable: ${msg}`);
+      throw new Error(`${getProviderDisplayName(config.provider)} API key is invalid or API is unreachable: ${msg}`);
     }
   }
 
@@ -277,7 +278,7 @@ export async function syncDirectory(
   // Batch summarize all files (handles rate limiting internally)
   if (filesToSummarize.length > 0) {
     const batchResult = await summarizeFilesBatch(
-      apiKey,
+      config,
       filesToSummarize.map(({ file, content }) => ({
         relativePath: file.relativePath,
         content,
@@ -328,7 +329,7 @@ export async function syncDirectory(
 
   try {
     const indexContent = await summarizeDirectory(
-      apiKey,
+      config,
       workspaceDir,
       files,
       manifest.entries

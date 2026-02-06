@@ -4,7 +4,7 @@
  * Inspired by gemini-cli's loopDetectionService
  */
 
-import type { OpenRouterMessage } from '../openrouter';
+import type { LLMMessage } from '../llm';
 
 export interface LoopDetectionResult {
   /** Whether a loop was detected */
@@ -30,13 +30,12 @@ export interface LoopDetectionConfig {
 
 const DEFAULT_MIN_MESSAGES = 4;
 const DEFAULT_MAX_CONSECUTIVE_TOOL_CALLS = 3;
-const DEFAULT_SIMILARITY_THRESHOLD = 0.85;
 const DEFAULT_MAX_CONSECUTIVE_ERRORS = 3;
 
 /**
- * Extract tool calls from messages (OpenRouter format)
+ * Extract tool calls from messages (OpenAI-compatible format)
  */
-function extractToolCalls(messages: OpenRouterMessage[]): Array<{ name: string; args: string }> {
+function extractToolCalls(messages: LLMMessage[]): Array<{ name: string; args: string }> {
   const toolCalls: Array<{ name: string; args: string }> = [];
 
   for (const msg of messages) {
@@ -54,9 +53,9 @@ function extractToolCalls(messages: OpenRouterMessage[]): Array<{ name: string; 
 }
 
 /**
- * Extract errors from tool response messages (OpenRouter format)
+ * Extract errors from tool response messages
  */
-function extractErrors(messages: OpenRouterMessage[]): string[] {
+function extractErrors(messages: LLMMessage[]): string[] {
   const errors: string[] = [];
 
   for (const msg of messages) {
@@ -167,7 +166,7 @@ function checkErrorLoop(
  * Detect loops in conversation
  */
 export function detectLoop(
-  messages: OpenRouterMessage[],
+  messages: LLMMessage[],
   config: LoopDetectionConfig = {}
 ): LoopDetectionResult {
   const minMessages = config.minMessages ?? DEFAULT_MIN_MESSAGES;

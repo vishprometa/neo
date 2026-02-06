@@ -1,13 +1,13 @@
 /**
  * LLM-based file summarization for Neo memory system
- * Uses OpenRouter API with Google Gemini models
+ * Supports both Gemini (direct) and OpenRouter providers
  * 
  * Optimized for rate limits:
  * - Batches multiple small files into single API calls
  * - Smart content truncation based on file type
  * - Exponential backoff on rate limit errors
  */
-import { OpenRouterClient, MODELS } from '../openrouter';
+import { createSummarizationClient, type ProviderConfig, type LLMClient } from '../llm';
 import type { FileInfo, ManifestEntry } from './service';
 
 /** Maximum tokens per batch (conservative estimate: 4 chars = 1 token) */
@@ -73,16 +73,16 @@ function getSmartTruncateLimit(extension: string): number {
 }
 
 /**
- * Summarize a single file using OpenRouter
+ * Summarize a single file
  * This is the public API - internally uses batching when called via summarizeFilesBatch
  */
 export async function summarizeFile(
-  apiKey: string,
+  config: ProviderConfig,
   relativePath: string,
   content: string,
   extension: string
 ): Promise<string> {
-  const results = await summarizeFilesBatch(apiKey, [
+  const results = await summarizeFilesBatch(config, [
     { relativePath, content, extension }
   ]);
   
@@ -98,11 +98,11 @@ export async function summarizeFile(
  * Groups files to minimize API calls while staying under token limits
  */
 export async function summarizeFilesBatch(
-  apiKey: string,
+  config: ProviderConfig,
   files: FileToSummarize[],
   onProgress?: (processed: number, total: number) => void
 ): Promise<BatchResult> {
-  const client = new OpenRouterClient(apiKey, MODELS.GEMINI_3_FLASH);
+  const client = createSummarizationClient(config);
   const summaries = new Map<string, string>();
   const errors: string[] = [];
   
@@ -215,7 +215,7 @@ export async function summarizeFilesBatch(
  * Process a single batch of files
  */
 async function processBatch(
-  client: OpenRouterClient,
+  client: LLMClient,
   files: Array<{ relativePath: string; truncatedContent: string; extension: string }>
 ): Promise<Map<string, string>> {
   const summaries = new Map<string, string>();
@@ -337,12 +337,12 @@ Indexed: ${new Date().toISOString()}
  * Generate a directory index summary
  */
 export async function summarizeDirectory(
-  apiKey: string,
+  config: ProviderConfig,
   workspaceDir: string,
   files: FileInfo[],
   entries: Record<string, ManifestEntry>
 ): Promise<string> {
-  const client = new OpenRouterClient(apiKey, MODELS.GEMINI_3_FLASH);
+  const client = createSummarizationClient(config);
   
   // Build directory tree
   const tree = buildDirectoryTree(files.map(f => f.relativePath));

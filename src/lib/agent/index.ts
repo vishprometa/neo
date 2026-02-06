@@ -10,7 +10,6 @@ export {
   needsCompression,
   estimateTokens,
   type CompressionResult,
-  type CompressionConfig,
 } from './compression';
 
 export {

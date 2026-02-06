@@ -14,13 +14,14 @@ import {
   loadMemoryContext,
 } from '../../memory';
 
-/** Extended tool context with API key */
+/** Extended tool context with provider config */
 interface ExtendedToolContext {
   sessionId: string;
   workspaceDir: string;
   callId: string;
   signal: AbortSignal;
   apiKey: string;
+  provider: 'gemini' | 'openrouter';
 }
 
 /**
@@ -44,13 +45,15 @@ The sync process:
   }),
   async execute(_params, ctx) {
     const extCtx = ctx as unknown as ExtendedToolContext;
-    const apiKey = extCtx.apiKey;
     
-    if (!apiKey) {
+    if (!extCtx.apiKey) {
       throw new Error('API key not available for memory sync');
     }
 
-    const result = await syncDirectory(ctx.workspaceDir, apiKey);
+    const result = await syncDirectory(ctx.workspaceDir, { 
+      provider: extCtx.provider, 
+      apiKey: extCtx.apiKey 
+    });
 
     return {
       title: 'Memory Sync',

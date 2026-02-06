@@ -6,15 +6,16 @@ import { MessageBlock } from '../components/MessageBlock';
 import { ThreadSidebar } from '../components/ThreadSidebar';
 import { DeleteThreadDialog } from '../components/DeleteThreadDialog';
 import { SyncStatus } from '../components/SyncStatus';
-import { useThreads, useChat, useMemorySync, type ThemeMode } from '../hooks';
-import type { SyncProgress } from '../lib/memory';
+import { useThreads, useChat, useMemorySync } from '../hooks';
 import type { Message, ModelType } from '../lib/agent';
+import type { ProviderConfig } from '../lib/llm';
+import { getModelDisplayName } from '../lib/llm';
 
 type SidebarTab = 'threads' | 'memory';
 
 interface ChatViewProps {
   workspaceDir: string;
-  apiKey: string;
+  providerConfig: ProviderConfig;
   isFocused: boolean;
   onOpenSettings: () => void;
   onNewWindow: () => void;
@@ -24,7 +25,7 @@ interface ChatViewProps {
 
 export function ChatView({
   workspaceDir,
-  apiKey,
+  providerConfig,
   isFocused,
   onOpenSettings,
   onNewWindow,
@@ -59,7 +60,7 @@ export function ChatView({
   // Memory sync
   const { syncProgress, isSyncing, memoryStatus, resync } = useMemorySync({
     workspaceDir,
-    apiKey,
+    providerConfig,
     onError: setError,
   });
 
@@ -75,7 +76,7 @@ export function ChatView({
     toolCallCount,
     abortControllerRef,
   } = useChat({
-    apiKey,
+    providerConfig,
     workspaceDir,
     messages,
     setMessages,
@@ -164,7 +165,7 @@ export function ChatView({
         <div className="chat-container">
           <div className="chat-header">
             <span className="chat-header-badge">
-              {selectedModel === 'thinking' ? 'Gemini 3 Pro' : 'Gemini 3 Flash'}
+              {getModelDisplayName(providerConfig.provider, selectedModel)}
             </span>
             <span className="chat-header-badge">{messages.length} messages</span>
             {toolCallCount > 0 && (

@@ -4,12 +4,12 @@
  * Inspired by gemini-cli's ChatCompressionService
  */
 
-import type { OpenRouterMessage } from '../openrouter';
-import { OpenRouterClient, MODELS } from '../openrouter';
+import type { LLMMessage, ProviderConfig } from '../llm';
+import { createCompressionClient } from '../llm';
 
 export interface CompressionResult {
   /** Compressed messages */
-  messages: OpenRouterMessage[];
+  messages: LLMMessage[];
   /** Number of messages before compression */
   originalCount: number;
   /** Number of messages after compression */
@@ -18,31 +18,23 @@ export interface CompressionResult {
   summary?: string;
 }
 
-export interface CompressionConfig {
-  /** Maximum number of messages before compression kicks in */
-  maxMessages?: number;
-  /** Target number of messages after compression */
-  targetMessages?: number;
-  /** Whether to preserve the last N messages uncompressed */
-  preserveRecent?: number;
-  /** API key for compression model */
-  apiKey: string;
-}
-
 const DEFAULT_MAX_MESSAGES = 30;
-const DEFAULT_TARGET_MESSAGES = 15;
 const DEFAULT_PRESERVE_RECENT = 5;
 
 /**
  * Compress conversation history
  */
 export async function compressConversation(
-  messages: OpenRouterMessage[],
-  config: CompressionConfig
+  messages: LLMMessage[],
+  config: ProviderConfig,
+  options?: {
+    maxMessages?: number;
+    targetMessages?: number;
+    preserveRecent?: number;
+  }
 ): Promise<CompressionResult> {
-  const maxMessages = config.maxMessages ?? DEFAULT_MAX_MESSAGES;
-  const targetMessages = config.targetMessages ?? DEFAULT_TARGET_MESSAGES;
-  const preserveRecent = config.preserveRecent ?? DEFAULT_PRESERVE_RECENT;
+  const maxMessages = options?.maxMessages ?? DEFAULT_MAX_MESSAGES;
+  const preserveRecent = options?.preserveRecent ?? DEFAULT_PRESERVE_RECENT;
 
   // Don't compress if under threshold
   if (messages.length <= maxMessages) {
@@ -66,10 +58,10 @@ export async function compressConversation(
   }
 
   // Generate summary of compressed messages
-  const summary = await generateConversationSummary(toCompress, config.apiKey);
+  const summary = await generateConversationSummary(toCompress, config);
 
   // Create compressed message
-  const compressedMessage: OpenRouterMessage = {
+  const compressedMessage: LLMMessage = {
     role: 'user',
     content: `[CONVERSATION SUMMARY]\n\nThe following is a summary of the earlier conversation:\n\n${summary}\n\n[END SUMMARY]\n\nPlease continue the conversation considering this context.`,
   };
@@ -88,10 +80,10 @@ export async function compressConversation(
  * Generate a summary of conversation messages
  */
 async function generateConversationSummary(
-  messages: OpenRouterMessage[],
-  apiKey: string
+  messages: LLMMessage[],
+  config: ProviderConfig
 ): Promise<string> {
-  const client = new OpenRouterClient(apiKey, MODELS.GEMINI_2_5_FLASH_LITE);
+  const client = createCompressionClient(config);
 
   // Format messages for summarization
   const formattedMessages = messages.map((msg) => {
@@ -136,7 +128,7 @@ ${formattedMessages}`;
  * Check if conversation needs compression
  */
 export function needsCompression(
-  messages: OpenRouterMessage[],
+  messages: LLMMessage[],
   maxMessages: number = DEFAULT_MAX_MESSAGES
 ): boolean {
   return messages.length > maxMessages;
@@ -145,7 +137,7 @@ export function needsCompression(
 /**
  * Estimate token count for messages (rough estimate)
  */
-export function estimateTokens(messages: OpenRouterMessage[]): number {
+export function estimateTokens(messages: LLMMessage[]): number {
   let chars = 0;
   for (const msg of messages) {
     if (typeof msg.content === 'string') {

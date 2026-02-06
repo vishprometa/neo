@@ -1,15 +1,18 @@
 /**
  * Agent runtime for Neo coding assistant
- * Block-based streaming architecture using OpenRouter API
+ * Block-based streaming architecture using unified LLM interface
+ * Supports both Gemini (direct) and OpenRouter providers
  */
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
-  OpenRouterClient,
-  MODELS,
-  type OpenRouterMessage,
-  type OpenRouterTool,
-  type OpenRouterStreamDelta,
-} from '../openrouter';
+  createClient,
+  type LLMClient,
+  type LLMMessage,
+  type LLMTool,
+  type LLMStreamDelta,
+  type ProviderConfig,
+  type ModelType,
+} from '../llm';
 import { registry } from './registry';
 import { registerTools } from './tools';
 import { buildSystemPrompt } from './system-prompt';
@@ -30,21 +33,14 @@ import {
 
 // Re-export types
 export type { AgentEvent, AgentEventHandler } from './types';
+export type { ModelType };
 
-export type ModelType = 'fast' | 'thinking';
-
-/** Map model types to OpenRouter model IDs */
-const MODEL_MAP: Record<ModelType, string> = {
-  fast: MODELS.GEMINI_3_FLASH,
-  thinking: MODELS.GEMINI_3_PRO,
-};
-
-/** Message format for history (OpenRouter compatible) */
-export type ChatMessage = OpenRouterMessage;
+/** Message format for history (OpenAI/OpenRouter compatible) */
+export type ChatMessage = LLMMessage;
 
 export class AgentRuntime {
-  private client: OpenRouterClient;
-  private apiKey: string;
+  private client: LLMClient;
+  private providerConfig: ProviderConfig;
   private workspaceDir: string;
   private sessionId: string;
   private history: ChatMessage[] = [];
@@ -54,16 +50,17 @@ export class AgentRuntime {
   private contextManager: ContextManager | null = null;
   private modelType: ModelType = 'fast';
 
-  constructor(apiKey: string, workspaceDir: string, sessionId?: string) {
-    this.client = new OpenRouterClient(apiKey, MODEL_MAP['fast']);
-    this.apiKey = apiKey;
+  constructor(providerConfig: ProviderConfig, workspaceDir: string, sessionId?: string) {
+    this.client = createClient(providerConfig, 'fast');
+    this.providerConfig = providerConfig;
     this.workspaceDir = workspaceDir;
     this.sessionId = sessionId || `session_${Date.now()}`;
   }
 
   setModelType(modelType: ModelType) {
     this.modelType = modelType;
-    this.client.setModel(MODEL_MAP[modelType]);
+    // Re-create client with new model type
+    this.client = createClient(this.providerConfig, modelType);
   }
 
   getModelType(): ModelType {
@@ -112,7 +109,7 @@ export class AgentRuntime {
     }
   }
 
-  private getToolDefinitions(): OpenRouterTool[] {
+  private getToolDefinitions(): LLMTool[] {
     const tools = registry.all();
     return tools.map((tool) => {
       const jsonSchema = zodToJsonSchema(tool.parameters as any, { name: tool.id });
@@ -177,7 +174,7 @@ export class AgentRuntime {
         systemPrompt,
         this.history,
         tools,
-        (delta: OpenRouterStreamDelta) => {
+        (delta: LLMStreamDelta) => {
           if (delta.content) {
             streamedText += delta.content;
             
@@ -284,7 +281,7 @@ export class AgentRuntime {
       // Check for conversation compression
       if (needsCompression(this.history, 30)) {
         try {
-          const compressed = await compressConversation(this.history, { apiKey: this.apiKey });
+          const compressed = await compressConversation(this.history, this.providerConfig);
           if (compressed.compressedCount < compressed.originalCount) {
             this.history = compressed.messages;
           }
@@ -336,7 +333,8 @@ export class AgentRuntime {
       workspaceDir: this.workspaceDir,
       callId: fc.id,
       signal: signal || new AbortController().signal,
-      apiKey: this.apiKey,
+      apiKey: this.providerConfig.apiKey,
+      provider: this.providerConfig.provider,
     };
 
     const startTime = Date.now();

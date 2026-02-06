@@ -9,9 +9,12 @@ import {
 } from 'lucide-react';
 import { NeoLogo } from '../components/NeoLogo';
 import type { ThemeMode } from '../hooks';
+import type { LLMProvider } from '../lib/llm';
+import { getProviderDisplayName } from '../lib/llm';
 
 interface WelcomeViewProps {
   apiKey: string | null;
+  provider: LLMProvider;
   theme: ThemeMode;
   onThemeChange: (mode: ThemeMode) => void;
   onOpenSettings: () => void;
@@ -22,6 +25,7 @@ interface WelcomeViewProps {
 
 export function WelcomeView({
   apiKey,
+  provider,
   theme,
   onThemeChange,
   onOpenSettings,
@@ -74,7 +78,7 @@ export function WelcomeView({
         {!apiKey && (
           <div className="welcome-warning">
             <AlertCircle size={14} />
-            <span>Configure your OpenRouter API key in settings to get started.</span>
+            <span>Configure your {getProviderDisplayName(provider)} API key in settings to get started.</span>
           </div>
         )}
 

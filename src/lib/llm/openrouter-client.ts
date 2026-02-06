@@ -1,12 +1,21 @@
 /**
- * OpenRouter API client for Neo coding assistant
- * Uses Google Gemini models via OpenRouter
+ * OpenRouter client for Neo
+ * Implements the unified LLMClient interface
  */
+import type {
+  LLMClient,
+  LLMMessage,
+  LLMTool,
+  LLMStreamDelta,
+  LLMChatResult,
+  LLMFunctionCall,
+  LLMProvider,
+} from './types';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 /** OpenRouter model IDs for Google Gemini models */
-export const MODELS = {
+export const OPENROUTER_MODELS = {
   // Main chat models
   GEMINI_3_FLASH: 'google/gemini-3-flash-preview',
   GEMINI_3_PRO: 'google/gemini-3-pro-preview',
@@ -14,36 +23,6 @@ export const MODELS = {
   GEMINI_2_5_FLASH: 'google/gemini-2.5-flash',
   GEMINI_2_5_FLASH_LITE: 'google/gemini-2.5-flash-lite',
 } as const;
-
-export type OpenRouterMessage = {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
-  tool_calls?: Array<{
-    id: string;
-    type: 'function';
-    function: { name: string; arguments: string };
-  }>;
-  tool_call_id?: string;
-};
-
-export type OpenRouterTool = {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-};
-
-export type OpenRouterStreamDelta = {
-  content?: string;
-  reasoning?: string;
-  toolCalls?: Array<{
-    id: string;
-    type: string;
-    function: { name: string; arguments: string };
-  }>;
-};
 
 interface StreamChunkDelta {
   content?: string;
@@ -65,11 +44,6 @@ interface StreamChunk {
     delta?: StreamChunkDelta;
     finish_reason?: string;
   }>;
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
 }
 
 interface ChatResponse {
@@ -88,11 +62,6 @@ interface ChatResponse {
     };
     finish_reason: string;
   }>;
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
 }
 
 interface StreamAccumulator {
@@ -106,18 +75,18 @@ interface StreamAccumulator {
 }
 
 /**
- * OpenRouter client for chat completions
+ * OpenRouter LLM Client
  */
-export class OpenRouterClient {
+export class OpenRouterClient implements LLMClient {
   private apiKey: string;
   private model: string;
 
-  constructor(apiKey: string, model: string = MODELS.GEMINI_3_FLASH) {
+  constructor(apiKey: string, model: string = OPENROUTER_MODELS.GEMINI_3_FLASH) {
     this.apiKey = apiKey;
     this.model = model;
   }
 
-  setModel(model: string) {
+  setModel(model: string): void {
     this.model = model;
   }
 
@@ -125,22 +94,18 @@ export class OpenRouterClient {
     return this.model;
   }
 
-  /**
-   * Create a streaming chat completion
-   */
+  getProvider(): LLMProvider {
+    return 'openrouter';
+  }
+
   async streamChat(
     systemInstruction: string,
-    messages: OpenRouterMessage[],
-    tools: OpenRouterTool[],
-    onDelta: (delta: OpenRouterStreamDelta) => void,
+    messages: LLMMessage[],
+    tools: LLMTool[],
+    onDelta: (delta: LLMStreamDelta) => void,
     signal?: AbortSignal
-  ): Promise<{
-    text: string;
-    functionCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
-    finishReason: string;
-  }> {
-    // Build messages array with system instruction
-    const fullMessages: OpenRouterMessage[] = [
+  ): Promise<LLMChatResult> {
+    const fullMessages: LLMMessage[] = [
       { role: 'system', content: systemInstruction },
       ...messages,
     ];
@@ -174,8 +139,7 @@ export class OpenRouterClient {
 
     const { acc, finishReason } = await this.parseSseStream(response, onDelta);
 
-    // Convert accumulated tool calls to the expected format
-    const functionCalls = acc.toolCalls.map((tc) => {
+    const functionCalls: LLMFunctionCall[] = acc.toolCalls.map((tc) => {
       let args: Record<string, unknown> = {};
       try {
         args = JSON.parse(tc.function.arguments || '{}');
@@ -196,18 +160,12 @@ export class OpenRouterClient {
     };
   }
 
-  /**
-   * Create a non-streaming chat completion
-   */
   async chat(
     systemInstruction: string,
-    messages: OpenRouterMessage[],
-    tools: OpenRouterTool[] = []
-  ): Promise<{
-    text: string;
-    functionCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
-  }> {
-    const fullMessages: OpenRouterMessage[] = [
+    messages: LLMMessage[],
+    tools: LLMTool[] = []
+  ): Promise<LLMChatResult> {
+    const fullMessages: LLMMessage[] = [
       { role: 'system', content: systemInstruction },
       ...messages,
     ];
@@ -245,7 +203,7 @@ export class OpenRouterClient {
       return { text: '', functionCalls: [] };
     }
 
-    const functionCalls = (choice.message.tool_calls || []).map((tc) => {
+    const functionCalls: LLMFunctionCall[] = (choice.message.tool_calls || []).map((tc) => {
       let args: Record<string, unknown> = {};
       try {
         args = JSON.parse(tc.function.arguments || '{}');
@@ -262,12 +220,10 @@ export class OpenRouterClient {
     return {
       text: choice.message.content || '',
       functionCalls,
+      finishReason: choice.finish_reason,
     };
   }
 
-  /**
-   * Simple text completion (no tools, no streaming)
-   */
   async complete(
     systemInstruction: string,
     prompt: string,
@@ -304,12 +260,9 @@ export class OpenRouterClient {
     return result.choices?.[0]?.message?.content || '';
   }
 
-  /**
-   * Parse SSE stream from OpenRouter
-   */
   private async parseSseStream(
     response: Response,
-    onDelta: (delta: OpenRouterStreamDelta) => void
+    onDelta: (delta: LLMStreamDelta) => void
   ): Promise<{ acc: StreamAccumulator; finishReason: string }> {
     if (!response.body) {
       throw new Error('OpenRouter API error: empty stream response');
@@ -360,20 +313,17 @@ export class OpenRouterClient {
             const delta = choice.delta;
             if (!delta) continue;
 
-            // Handle reasoning content
             const reasoningDelta = delta.reasoning || delta.reasoning_content;
             if (reasoningDelta) {
               acc.reasoning += reasoningDelta;
               onDelta({ reasoning: reasoningDelta });
             }
 
-            // Handle text content
             if (delta.content) {
               acc.content += delta.content;
               onDelta({ content: delta.content });
             }
 
-            // Handle tool calls
             if (delta.tool_calls) {
               this.applyToolCallDeltas(acc, delta.tool_calls);
               onDelta({ toolCalls: acc.toolCalls });
@@ -392,9 +342,6 @@ export class OpenRouterClient {
     return { acc, finishReason };
   }
 
-  /**
-   * Apply incremental tool call deltas to accumulator
-   */
   private applyToolCallDeltas(
     acc: StreamAccumulator,
     deltas: Array<{
@@ -407,7 +354,6 @@ export class OpenRouterClient {
     for (const delta of deltas) {
       const idx = delta.index;
 
-      // Ensure we have a slot for this tool call
       while (acc.toolCalls.length <= idx) {
         acc.toolCalls.push({
           id: '',
@@ -418,26 +364,18 @@ export class OpenRouterClient {
 
       const tc = acc.toolCalls[idx];
 
-      if (delta.id) {
-        tc.id = delta.id;
-      }
-      if (delta.type) {
-        tc.type = delta.type;
-      }
-      if (delta.function?.name) {
-        tc.function.name += delta.function.name;
-      }
-      if (delta.function?.arguments) {
-        tc.function.arguments += delta.function.arguments;
-      }
+      if (delta.id) tc.id = delta.id;
+      if (delta.type) tc.type = delta.type;
+      if (delta.function?.name) tc.function.name += delta.function.name;
+      if (delta.function?.arguments) tc.function.arguments += delta.function.arguments;
     }
   }
 }
 
 /**
- * Validate an OpenRouter API key by making a simple test request
+ * Validate an OpenRouter API key
  */
-export async function validateApiKey(apiKey: string): Promise<boolean> {
+export async function validateOpenRouterApiKey(apiKey: string): Promise<boolean> {
   try {
     const response = await fetch(OPENROUTER_API_URL, {
       method: 'POST',
@@ -448,7 +386,7 @@ export async function validateApiKey(apiKey: string): Promise<boolean> {
         'X-Title': 'Neo Coding Assistant',
       },
       body: JSON.stringify({
-        model: MODELS.GEMINI_2_5_FLASH_LITE,
+        model: OPENROUTER_MODELS.GEMINI_2_5_FLASH_LITE,
         messages: [{ role: 'user', content: 'Reply with OK' }],
         max_tokens: 10,
         stream: false,

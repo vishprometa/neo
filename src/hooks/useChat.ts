@@ -1,16 +1,17 @@
 import { useState, useRef, useCallback } from 'react';
 import { AgentRuntime, type AgentEvent, type Message, type ContentBlock, type ModelType } from '../lib/agent';
 import { processAtMentions, extractAtMentions } from '../lib/prompt';
+import type { ProviderConfig } from '../lib/llm';
 
 interface UseChatOptions {
-  apiKey: string | null;
+  providerConfig: ProviderConfig | null;
   workspaceDir: string | null;
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onError: (error: string) => void;
 }
 
-export function useChat({ apiKey, workspaceDir, messages, setMessages, onError }: UseChatOptions) {
+export function useChat({ providerConfig, workspaceDir, messages, setMessages, onError }: UseChatOptions) {
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ModelType>('fast');
@@ -18,24 +19,32 @@ export function useChat({ apiKey, workspaceDir, messages, setMessages, onError }
   const runtimeRef = useRef<AgentRuntime | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const currentAssistantMsgIdRef = useRef<string | null>(null);
+  // Track the provider config used to create the runtime
+  const runtimeConfigRef = useRef<ProviderConfig | null>(null);
 
   const initializeRuntime = useCallback(async () => {
-    if (runtimeRef.current) return runtimeRef.current;
-    if (!apiKey || !workspaceDir) {
-      onError('No API key configured. Please add your Gemini API key in settings.');
+    // Check if we need to recreate the runtime (provider changed)
+    const configChanged = runtimeConfigRef.current?.provider !== providerConfig?.provider ||
+                          runtimeConfigRef.current?.apiKey !== providerConfig?.apiKey;
+    
+    if (runtimeRef.current && !configChanged) return runtimeRef.current;
+    
+    if (!providerConfig || !workspaceDir) {
+      onError('No API key configured. Please add your API key in settings.');
       return null;
     }
     try {
-      const runtime = new AgentRuntime(apiKey, workspaceDir);
+      const runtime = new AgentRuntime(providerConfig, workspaceDir);
       await runtime.initialize();
       runtimeRef.current = runtime;
+      runtimeConfigRef.current = providerConfig;
       return runtime;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       onError(`Failed to initialize: ${errorMsg}`);
       return null;
     }
-  }, [workspaceDir, apiKey, onError]);
+  }, [workspaceDir, providerConfig, onError]);
 
   const mergeBlockIntoMessages = useCallback((block: ContentBlock) => {
     setMessages((prev) => {
@@ -160,6 +169,7 @@ export function useChat({ apiKey, workspaceDir, messages, setMessages, onError }
 
   const resetRuntime = useCallback(() => {
     runtimeRef.current = null;
+    runtimeConfigRef.current = null;
     currentAssistantMsgIdRef.current = null;
   }, []);
 
