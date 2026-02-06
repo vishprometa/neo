@@ -5,3 +5,4 @@ export { useMemorySync } from './useMemorySync';
 export { useFolderPicker } from './useFolderPicker';
 export { useKeyboardShortcuts } from './useKeyboardShortcuts';
 export { useWindowFocus } from './useWindowFocus';
+export { useFileSuggestions, type FileSuggestion } from './useFileSuggestions';

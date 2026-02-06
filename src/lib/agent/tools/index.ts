@@ -22,6 +22,8 @@ import {
   listSkillsTool,
   useSkillTool,
 } from './skill-tools';
+import { ShellTool } from './shell-tool';
+import { WebFetchTool, WebSearchTool } from './web-tools';
 
 let registered = false;
 
@@ -47,6 +49,13 @@ export function registerTools() {
   // Skill tools
   registry.register(listSkillsTool);
   registry.register(useSkillTool);
+  
+  // Shell tool
+  registry.register(ShellTool);
+  
+  // Web tools
+  registry.register(WebFetchTool);
+  registry.register(WebSearchTool);
   
   registered = true;
 }

@@ -244,6 +244,7 @@ export function ChatView({
             disabled={isProcessing && !abortControllerRef.current}
             selectedModel={selectedModel}
             onModelChange={setSelectedModel}
+            workspaceDir={workspaceDir}
           />
         </div>
       </div>

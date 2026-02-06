@@ -24,3 +24,10 @@ export {
   summarizeFilesBatch,
   summarizeDirectory,
 } from './summarizer';
+
+export {
+  ContextManager,
+  createContextManager,
+  type MemoryTier,
+  type ContextManagerOptions,
+} from './context-manager';

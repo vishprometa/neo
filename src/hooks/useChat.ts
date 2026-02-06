@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { AgentRuntime, type AgentEvent, type Message, type ContentBlock, type ModelType } from '../lib/agent';
+import { processAtMentions, extractAtMentions } from '../lib/prompt';
 
 interface UseChatOptions {
   apiKey: string | null;
@@ -78,17 +79,38 @@ export function useChat({ apiKey, workspaceDir, messages, setMessages, onError }
   const submit = useCallback(async () => {
     if (!input.trim() || isProcessing) return;
 
-    const userMessage = input.trim();
+    const rawInput = input.trim();
     setInput('');
     setIsProcessing(true);
     currentAssistantMsgIdRef.current = null;
 
-    // Add user message
+    // Process @ mentions if workspace is available
+    let processedMessage = rawInput;
+    let injectedFiles: string[] = [];
+    
+    if (workspaceDir && extractAtMentions(rawInput).length > 0) {
+      try {
+        const result = await processAtMentions(rawInput, workspaceDir);
+        processedMessage = result.text;
+        injectedFiles = result.injectedFiles;
+        
+        // Log any errors but don't fail
+        if (result.errors.length > 0) {
+          console.warn('@ mention errors:', result.errors);
+        }
+      } catch (err) {
+        console.error('Failed to process @ mentions:', err);
+        // Fall back to raw input
+        processedMessage = rawInput;
+      }
+    }
+
+    // Add user message (display the original input with @path syntax)
     const userMsgId = `user_${Date.now()}`;
     setMessages((prev) => [...prev, {
       id: userMsgId,
       role: 'user',
-      text: userMessage,
+      text: rawInput,
       timestamp: Date.now(),
     }]);
 
@@ -121,13 +143,14 @@ export function useChat({ apiKey, workspaceDir, messages, setMessages, onError }
     });
 
     try {
-      await runtime.sendMessage(userMessage, abortControllerRef.current.signal);
+      // Send the processed message with file contents injected
+      await runtime.sendMessage(processedMessage, abortControllerRef.current.signal);
     } catch (err) {
       if (err instanceof Error && err.message !== 'Aborted') {
         onError(err.message);
       }
     }
-  }, [input, isProcessing, selectedModel, initializeRuntime, mergeBlockIntoMessages, setMessages, onError]);
+  }, [input, isProcessing, selectedModel, workspaceDir, initializeRuntime, mergeBlockIntoMessages, setMessages, onError]);
 
   const cancel = useCallback(() => {
     abortControllerRef.current?.abort();

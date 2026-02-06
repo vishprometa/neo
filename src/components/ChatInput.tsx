@@ -1,11 +1,15 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import {
   ArrowUp,
   Square,
   ChevronDown,
   MessageSquare,
   Zap,
+  FileText,
+  Folder,
+  AtSign,
 } from 'lucide-react';
+import { useFileSuggestions, type FileSuggestion } from '../hooks/useFileSuggestions';
 
 type ModelType = 'fast' | 'thinking';
 
@@ -43,6 +47,14 @@ interface ChatInputProps {
   disabled?: boolean;
   selectedModel?: ModelType;
   onModelChange?: (model: ModelType) => void;
+  workspaceDir?: string | null;
+}
+
+interface MentionState {
+  isActive: boolean;
+  query: string;
+  startIndex: number;
+  type: 'file' | null;
 }
 
 export function ChatInput({
@@ -54,11 +66,33 @@ export function ChatInput({
   disabled = false,
   selectedModel = 'fast',
   onModelChange,
+  workspaceDir,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const suggestionsRef = useRef<HTMLDivElement>(null);
   const [showModelMenu, setShowModelMenu] = useState(false);
   const [modelMenuPosition, setModelMenuPosition] = useState<'top' | 'bottom'>('top');
+  
+  // Mention state
+  const [mentionState, setMentionState] = useState<MentionState>({
+    isActive: false,
+    query: '',
+    startIndex: -1,
+    type: null,
+  });
+
+  // File suggestions
+  const {
+    suggestions,
+    isLoading: isSuggestionsLoading,
+    selectedIndex,
+    setSelectedIndex,
+    searchFiles,
+    clearSuggestions,
+    selectNext,
+    selectPrev,
+  } = useFileSuggestions({ workspaceDir, maxSuggestions: 8 });
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -76,11 +110,25 @@ export function ChatInput({
           setShowModelMenu(false);
         }
       }
+      // Close suggestions when clicking outside
+      if (mentionState.isActive && suggestionsRef.current) {
+        if (!suggestionsRef.current.contains(event.target as Node) &&
+            event.target !== textareaRef.current) {
+          closeMention();
+        }
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showModelMenu]);
+  }, [showModelMenu, mentionState.isActive]);
+
+  // Search files when mention query changes
+  useEffect(() => {
+    if (mentionState.isActive && mentionState.type === 'file') {
+      searchFiles(mentionState.query);
+    }
+  }, [mentionState.isActive, mentionState.query, mentionState.type, searchFiles]);
 
   const autoResizeTextarea = (textarea: HTMLTextAreaElement) => {
     const maxHeight = 150;
@@ -99,11 +147,144 @@ export function ChatInput({
     textarea.scrollTop = scrollTop;
   };
 
+  const closeMention = useCallback(() => {
+    setMentionState({ isActive: false, query: '', startIndex: -1, type: null });
+    clearSuggestions();
+  }, [clearSuggestions]);
+
+  const insertMention = useCallback((suggestion: FileSuggestion) => {
+    const beforeMention = value.slice(0, mentionState.startIndex);
+    const afterMention = value.slice(mentionState.startIndex + mentionState.query.length + 1); // +1 for '@'
+    
+    // Add trailing slash for directories
+    const path = suggestion.isDirectory ? suggestion.path + '/' : suggestion.path;
+    const newValue = `${beforeMention}@${path} ${afterMention}`;
+    
+    onChange(newValue);
+    closeMention();
+
+    // Focus textarea and move cursor after the mention
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        const cursorPos = beforeMention.length + path.length + 2; // @path + space
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(cursorPos, cursorPos);
+      }
+    });
+  }, [value, mentionState.startIndex, mentionState.query, onChange, closeMention]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!disabled && e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      handleSend();
+    // Handle mention navigation
+    if (mentionState.isActive && suggestions.length > 0) {
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          selectNext();
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          selectPrev();
+          return;
+        case 'Enter':
+          if (!e.shiftKey) {
+            e.preventDefault();
+            insertMention(suggestions[selectedIndex]);
+            return;
+          }
+          break;
+        case 'Tab':
+          e.preventDefault();
+          insertMention(suggestions[selectedIndex]);
+          return;
+        case 'Escape':
+          e.preventDefault();
+          closeMention();
+          return;
+      }
     }
+
+    // Regular submit
+    if (!disabled && e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      if (!mentionState.isActive) {
+        e.preventDefault();
+        handleSend();
+      }
+    }
+
+    // Escape to close mention
+    if (e.key === 'Escape' && mentionState.isActive) {
+      e.preventDefault();
+      closeMention();
+    }
+  };
+
+  const handleInputChange = (newValue: string) => {
+    onChange(newValue);
+
+    // Check for @ mention trigger
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const cursorPos = textarea.selectionStart;
+    const textBeforeCursor = newValue.slice(0, cursorPos);
+
+    // Look for @path pattern (@ followed by non-whitespace)
+    const atMatch = textBeforeCursor.match(/@([a-zA-Z0-9_.~\-\/]*)$/);
+    
+    if (atMatch) {
+      const query = atMatch[1];
+      const startIndex = cursorPos - query.length - 1; // -1 for '@'
+      
+      setMentionState({
+        isActive: true,
+        query,
+        startIndex,
+        type: 'file',
+      });
+    } else if (mentionState.isActive) {
+      // Check if we're still in a mention (no space after @)
+      const lastAtIdx = textBeforeCursor.lastIndexOf('@');
+      if (lastAtIdx === -1) {
+        closeMention();
+      } else {
+        const afterAt = textBeforeCursor.slice(lastAtIdx + 1);
+        // Close if there's a space after the path
+        if (/\s/.test(afterAt) && afterAt.includes(' ')) {
+          closeMention();
+        }
+      }
+    }
+
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        autoResizeTextarea(textareaRef.current);
+      }
+    });
+  };
+
+  // Insert @ trigger
+  const handleAtButtonClick = () => {
+    if (!textareaRef.current) return;
+    
+    const cursorPos = textareaRef.current.selectionStart;
+    const newValue = value.slice(0, cursorPos) + '@' + value.slice(cursorPos);
+    onChange(newValue);
+    
+    // Set mention state
+    setMentionState({
+      isActive: true,
+      query: '',
+      startIndex: cursorPos,
+      type: 'file',
+    });
+
+    // Focus and position cursor
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(cursorPos + 1, cursorPos + 1);
+      }
+    });
   };
 
   const handleSend = () => {
@@ -140,8 +321,30 @@ export function ChatInput({
 
   const getPlaceholderText = () => {
     return selectedModel === 'thinking'
-      ? 'Ask me anything... I\'ll think deeply about it'
-      : 'Ask me anything...';
+      ? 'Ask me anything... Use @{file} to include files'
+      : 'Ask me anything... Use @{file} to include files';
+  };
+
+  const getFileIcon = (suggestion: FileSuggestion) => {
+    if (suggestion.isDirectory) {
+      return <Folder size={14} className="text-amber-500" />;
+    }
+    
+    const ext = suggestion.extension?.toLowerCase();
+    switch (ext) {
+      case 'ts':
+      case 'tsx':
+        return <FileText size={14} className="text-blue-500" />;
+      case 'js':
+      case 'jsx':
+        return <FileText size={14} className="text-yellow-500" />;
+      case 'json':
+        return <FileText size={14} className="text-green-500" />;
+      case 'md':
+        return <FileText size={14} className="text-purple-500" />;
+      default:
+        return <FileText size={14} className="text-gray-500" />;
+    }
   };
 
   return (
@@ -149,29 +352,77 @@ export function ChatInput({
       <div className="chat-input-wrapper">
         <div className="chat-input-main-box">
           {/* Input Area */}
-          <div className="chat-input-textarea-wrapper">
+          <div className="chat-input-textarea-wrapper relative">
             <textarea
               ref={textareaRef}
               value={value}
-              onChange={(e) => {
-                onChange(e.target.value);
-                requestAnimationFrame(() => {
-                  if (textareaRef.current) {
-                    autoResizeTextarea(textareaRef.current);
-                  }
-                });
-              }}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={getPlaceholderText()}
               disabled={disabled}
               rows={1}
               className="chat-input-textarea"
             />
+            
+            {/* @ Mention Suggestions Dropdown */}
+            {mentionState.isActive && suggestions.length > 0 && (
+              <div
+                ref={suggestionsRef}
+                className="mention-suggestions"
+              >
+                <div className="mention-suggestions-header">
+                  <FileText size={12} />
+                  <span>Files & Folders</span>
+                  {isSuggestionsLoading && (
+                    <span className="mention-loading">...</span>
+                  )}
+                </div>
+                <div className="mention-suggestions-list">
+                  {suggestions.map((suggestion, index) => (
+                    <button
+                      key={suggestion.path}
+                      className={`mention-suggestion-item ${index === selectedIndex ? 'selected' : ''}`}
+                      onClick={() => insertMention(suggestion)}
+                      onMouseEnter={() => setSelectedIndex(index)}
+                    >
+                      {getFileIcon(suggestion)}
+                      <span className="mention-suggestion-name">{suggestion.name}</span>
+                      {suggestion.path !== suggestion.name && (
+                        <span className="mention-suggestion-path">{suggestion.path}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="mention-suggestions-footer">
+                  <kbd>↑↓</kbd> navigate <kbd>Tab</kbd> select <kbd>Esc</kbd> close
+                </div>
+              </div>
+            )}
+
+            {/* Empty state when no suggestions found */}
+            {mentionState.isActive && mentionState.query && suggestions.length === 0 && !isSuggestionsLoading && (
+              <div ref={suggestionsRef} className="mention-suggestions">
+                <div className="mention-suggestions-empty">
+                  No files matching "{mentionState.query}"
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Bottom Controls */}
           <div className="chat-input-controls">
             <div className="chat-input-controls-left">
+              {/* @ Mention Button */}
+              {workspaceDir && (
+                <button
+                  onClick={handleAtButtonClick}
+                  className="chat-at-btn"
+                  title="Add file reference @{path}"
+                >
+                  <AtSign size={14} />
+                </button>
+              )}
+
               {/* Model Dropdown */}
               <div ref={menuRef} className="relative model-menu">
                 <button

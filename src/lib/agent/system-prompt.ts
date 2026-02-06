@@ -2,7 +2,11 @@
  * System prompt for Neo coding assistant
  */
 
-export function buildSystemPrompt(workspaceDir: string, memoryContext?: string): string {
+export function buildSystemPrompt(
+  workspaceDir: string,
+  memoryContext?: string,
+  contextInstructions?: string
+): string {
   const memorySection = memoryContext ? `
 
 ## Workspace Memory
@@ -12,6 +16,18 @@ project structure, and journal entries. This context helps you understand the co
 reading every file.
 
 ${memoryContext}
+
+---
+` : '';
+
+  const contextSection = contextInstructions ? `
+
+## User Instructions
+
+The following instructions were loaded from NEO.md, AGENTS.md, GEMINI.md, or .cursorrules files.
+Follow these instructions carefully as they contain user-specific preferences and project guidelines.
+
+${contextInstructions}
 
 ---
 ` : '';
@@ -32,6 +48,11 @@ You also have semantic memory tools that let you:
 - **write_memory**: Write journal entries to remember important context
 - **search_memory**: Search across all memory files
 - **list_memory**: List all indexed files
+
+You have shell and web tools:
+- **shell**: Execute shell commands in the workspace (use with caution)
+- **web_fetch**: Fetch content from URLs
+- **web_search**: Search the web for information
 
 ## Guidelines
 
@@ -68,6 +89,11 @@ You also have semantic memory tools that let you:
 - **search_memory**: Find files/entries matching a query.
 - **list_memory**: List all indexed file summaries.
 
+### Shell & Web Tools
+- **shell**: Execute shell commands. Be careful with destructive commands.
+- **web_fetch**: Fetch and read web pages/APIs.
+- **web_search**: Search the web for information.
+
 ### Skill Tools
 - **list_skills**: List all available skills in the workspace.
 - **use_skill**: Load a skill's instructions to follow.
@@ -79,7 +105,7 @@ Skills are reusable prompts defined in SKILL.md files within .neo/skills/ or ski
 You are working in: ${workspaceDir}
 
 All file paths should be relative to this workspace unless absolute paths are specifically needed.
-${memorySection}
+${contextSection}${memorySection}
 ## Response Style
 
 - Be concise but thorough
