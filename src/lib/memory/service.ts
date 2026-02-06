@@ -24,10 +24,14 @@ const PROGRESS_FILE = 'progress.json';
 
 /** File extensions to analyze */
 const TEXT_EXTENSIONS = new Set([
-  'md', 'txt', 'ts', 'tsx', 'js', 'jsx', 'json', 'yaml', 'yml',
-  'toml', 'py', 'go', 'rs', 'html', 'css', 'scss', 'less',
-  'java', 'c', 'cpp', 'h', 'hpp', 'sh', 'bash', 'zsh',
-  'sql', 'graphql', 'prisma', 'env', 'gitignore', 'dockerfile',
+  'md', 'mdx', 'txt', 'text', 'log', 'csv', 'tsv',
+  'ts', 'tsx', 'js', 'jsx', 'json', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf',
+  'py', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'cs', 'swift', 'kt',
+  'html', 'css', 'scss', 'less', 'xml', 'svg',
+  'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
+  'sql', 'graphql', 'prisma',
+  'env', 'gitignore', 'dockerfile', 'dockerignore',
+  'rst', 'adoc', 'tex', 'rtf',
 ]);
 
 /** Directories to skip during indexing */
@@ -72,6 +76,7 @@ export interface SyncProgress {
 }
 
 export type SyncProgressCallback = (progress: SyncProgress) => void;
+
 type LogLevel = 'info' | 'warning' | 'error' | 'success';
 type LogFn = (level: LogLevel, message: string) => void;
 

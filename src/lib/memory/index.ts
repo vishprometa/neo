@@ -13,8 +13,6 @@ export {
   getMemoryDir,
   ensureMemoryDir,
   type FileInfo,
-  type ManifestEntry,
-  type Manifest,
   type SyncProgress,
   type SyncProgressCallback,
 } from './service';
