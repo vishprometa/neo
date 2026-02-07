@@ -33,15 +33,73 @@ export const GEMINI_MODELS = {
  */
 function toGeminiContent(messages: LLMMessage[]): Content[] {
   const contents: Content[] = [];
-  
+
   for (const msg of messages) {
     if (msg.role === 'system') {
       // System messages are handled separately in Gemini
       continue;
     }
-    
+
+    // ── Tool responses need special handling ──────────────────────────
+    if (msg.role === 'tool' && msg.tool_call_id) {
+      const inlineDataParts: Part[] = [];
+      let textContent = '';
+
+      if (Array.isArray(msg.content)) {
+        // Multipart tool response (text + inline data like images/PDFs)
+        for (const item of msg.content) {
+          if (item.type === 'text' && item.text) {
+            textContent = item.text;
+          } else if (item.type === 'inline_data' && item.data && item.mime) {
+            inlineDataParts.push({
+              inlineData: {
+                mimeType: item.mime as string,
+                data: item.data as string,
+              },
+            });
+          }
+        }
+      } else if (typeof msg.content === 'string') {
+        textContent = msg.content;
+      }
+
+      // Parse the text into a response object
+      let response: Record<string, unknown> = {};
+      try {
+        response = textContent ? JSON.parse(textContent) : {};
+      } catch {
+        response = { result: textContent };
+      }
+
+      // 1. Add the functionResponse as its own Content block
+      contents.push({
+        role: 'user',
+        parts: [{
+          functionResponse: {
+            name: msg.tool_call_id,
+            response,
+          },
+        }],
+      });
+
+      // 2. If there are inline data parts (images/PDFs), add them in a
+      //    separate user Content block so Gemini can process them
+      if (inlineDataParts.length > 0) {
+        contents.push({
+          role: 'user',
+          parts: [
+            { text: `[Attached file: ${(response as Record<string, unknown>).result || 'binary content'}]` },
+            ...inlineDataParts,
+          ],
+        });
+      }
+
+      continue; // Skip the generic handler below
+    }
+
+    // ── All other messages ────────────────────────────────────────────
     const parts: Part[] = [];
-    
+
     // Handle content
     if (typeof msg.content === 'string') {
       if (msg.content) {
@@ -54,7 +112,7 @@ function toGeminiContent(messages: LLMMessage[]): Content[] {
         }
       }
     }
-    
+
     // Handle tool calls (assistant message)
     if (msg.tool_calls) {
       for (const tc of msg.tool_calls) {
@@ -72,23 +130,7 @@ function toGeminiContent(messages: LLMMessage[]): Content[] {
         });
       }
     }
-    
-    // Handle tool response
-    if (msg.role === 'tool' && msg.tool_call_id) {
-      let response: Record<string, unknown> = {};
-      try {
-        response = typeof msg.content === 'string' ? JSON.parse(msg.content) : {};
-      } catch {
-        response = { result: msg.content };
-      }
-      parts.push({
-        functionResponse: {
-          name: msg.tool_call_id, // We'll need to track tool names separately
-          response,
-        },
-      });
-    }
-    
+
     if (parts.length > 0) {
       contents.push({
         role: msg.role === 'assistant' ? 'model' : 'user',
@@ -96,7 +138,7 @@ function toGeminiContent(messages: LLMMessage[]): Content[] {
       });
     }
   }
-  
+
   return contents;
 }
 

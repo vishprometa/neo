@@ -1,13 +1,14 @@
 /**
  * Shell tool for Neo coding assistant
  * Executes shell commands with safety checks
+ * Enhanced with description and workdir params (ported from erpai-cli)
  */
 import { z } from 'zod';
 import { defineTool } from '../tool';
 import { Command } from '@tauri-apps/plugin-shell';
 
-const MAX_OUTPUT_LENGTH = 50000;
-const DEFAULT_TIMEOUT_MS = 30000;
+const MAX_OUTPUT_LENGTH = 50_000;
+const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes like erpai-cli
 
 /** Commands that are always blocked for safety */
 const BLOCKED_COMMANDS = new Set([
@@ -30,8 +31,6 @@ const DANGEROUS_PREFIXES = [
   'chown -R',
   'mv /',
   'cp /',
-  'sudo',
-  'su ',
 ];
 
 /**
@@ -39,90 +38,52 @@ const DANGEROUS_PREFIXES = [
  */
 function isDangerousCommand(command: string): { dangerous: boolean; reason?: string } {
   const trimmed = command.trim().toLowerCase();
-  
-  // Check blocked commands
+
   for (const blocked of BLOCKED_COMMANDS) {
     if (trimmed.includes(blocked.toLowerCase())) {
       return { dangerous: true, reason: `Command contains blocked pattern: ${blocked}` };
     }
   }
-  
-  // Check dangerous prefixes
+
   for (const prefix of DANGEROUS_PREFIXES) {
     if (trimmed.startsWith(prefix.toLowerCase())) {
       return { dangerous: true, reason: `Command starts with dangerous prefix: ${prefix}` };
     }
   }
-  
+
   return { dangerous: false };
 }
 
-/**
- * Parse command into program and args
- */
-function parseCommand(command: string): { program: string; args: string[] } {
-  // Simple parsing - split on spaces but handle quotes
-  const parts: string[] = [];
-  let current = '';
-  let inQuotes = false;
-  let quoteChar = '';
-  
-  for (let i = 0; i < command.length; i++) {
-    const char = command[i];
-    
-    if ((char === '"' || char === "'") && (i === 0 || command[i - 1] !== '\\')) {
-      if (!inQuotes) {
-        inQuotes = true;
-        quoteChar = char;
-      } else if (char === quoteChar) {
-        inQuotes = false;
-        quoteChar = '';
-      } else {
-        current += char;
-      }
-    } else if (char === ' ' && !inQuotes) {
-      if (current) {
-        parts.push(current);
-        current = '';
-      }
-    } else {
-      current += char;
-    }
-  }
-  
-  if (current) {
-    parts.push(current);
-  }
-  
-  return {
-    program: parts[0] || 'sh',
-    args: parts.slice(1),
-  };
-}
-
-export const ShellTool = defineTool('shell', {
+export const ShellTool = defineTool('bash', {
   description: `Execute a shell command in the workspace directory.
 
 Usage notes:
 - Commands are executed in the workspace directory by default
-- Use 'cwd' parameter to change the working directory
-- Commands have a 30 second timeout by default
+- Use 'workdir' parameter to change the working directory instead of 'cd' commands
+- Commands have a 2 minute timeout by default
 - Output is truncated to 50KB
-- Some dangerous commands are blocked for safety
+- Some dangerous commands are blocked for safety (rm -rf /, etc.)
+- Always provide a clear 'description' of what the command does
 
 SAFETY: This tool can modify your system. Use with caution.
 - Avoid destructive commands (rm -rf, etc.)
-- Be careful with sudo commands
 - Consider the impact before running`,
   parameters: z.object({
     command: z.string().describe('The shell command to execute'),
-    cwd: z.string().optional().describe('Working directory (defaults to workspace)'),
-    timeout: z.coerce.number().optional().describe('Timeout in milliseconds (default: 30000)'),
+    description: z.string().describe(
+      'Clear, concise description of what this command does in 5-10 words. Examples: "Lists files in current directory", "Installs package dependencies", "Shows working tree status"'
+    ),
+    workdir: z.string().optional().describe('Working directory for the command (defaults to workspace root). Use this instead of cd commands.'),
+    timeout: z.coerce.number().optional().describe('Timeout in milliseconds (default: 120000)'),
   }),
   async execute(params, ctx) {
     const command = params.command.trim();
-    const cwd = params.cwd || ctx.workspaceDir;
+    const cwd = params.workdir || ctx.workspaceDir;
     const timeout = params.timeout || DEFAULT_TIMEOUT_MS;
+
+    if (timeout < 0) {
+      throw new Error(`Invalid timeout value: ${timeout}. Timeout must be a positive number.`);
+    }
 
     // Safety check
     const safety = isDangerousCommand(command);
@@ -131,15 +92,11 @@ SAFETY: This tool can modify your system. Use with caution.
     }
 
     try {
-      // Use shell to execute the command
-      const shellCommand = Command.create('sh', ['-c', command], {
-        cwd,
-      });
+      const shellCommand = Command.create('sh', ['-c', command], { cwd });
 
       let stdout = '';
       let stderr = '';
 
-      // Collect output
       shellCommand.stdout.on('data', (data) => {
         stdout += data;
         if (stdout.length > MAX_OUTPUT_LENGTH) {
@@ -154,7 +111,6 @@ SAFETY: This tool can modify your system. Use with caution.
         }
       });
 
-      // Set up timeout
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => {
           shellCommand.kill();
@@ -162,22 +118,19 @@ SAFETY: This tool can modify your system. Use with caution.
         }, timeout);
       });
 
-      // Execute command
       const execPromise = shellCommand.execute();
-
-      // Race between execution and timeout
       const result = await Promise.race([execPromise, timeoutPromise]);
 
       // Build output
       let output = '';
-      
+
       if (stdout) {
         output += stdout;
         if (stdout.length >= MAX_OUTPUT_LENGTH) {
           output += '\n(stdout truncated)';
         }
       }
-      
+
       if (stderr) {
         if (output) output += '\n\n';
         output += `STDERR:\n${stderr}`;
@@ -190,10 +143,9 @@ SAFETY: This tool can modify your system. Use with caution.
         output = '(no output)';
       }
 
-      // Add exit code info
       const exitCode = result.code;
       const signal = result.signal;
-      
+
       let status = '';
       if (exitCode !== 0) {
         status = `\n\n[Exit code: ${exitCode}]`;
@@ -203,12 +155,13 @@ SAFETY: This tool can modify your system. Use with caution.
       }
 
       return {
-        title: `$ ${command.slice(0, 50)}${command.length > 50 ? '...' : ''}`,
+        title: params.description,
         output: output + status,
         metadata: {
           exitCode,
           signal,
           cwd,
+          description: params.description,
         },
       };
     } catch (err) {

@@ -51,8 +51,18 @@ export class AgentRuntime {
   private modelType: ModelType = 'fast';
 
   constructor(providerConfig: ProviderConfig, workspaceDir: string, sessionId?: string) {
-    this.client = createClient(providerConfig, 'fast');
-    this.providerConfig = providerConfig;
+    const normalizedWorkspaceDir = workspaceDir.replace(/\/$/, '');
+    const logPath = `${normalizedWorkspaceDir}/openrouter.log`;
+    const enhancedConfig = providerConfig.provider === 'openrouter'
+      ? {
+          ...providerConfig,
+          logPath: providerConfig.logPath ?? logPath,
+          openrouterPdfEngine: providerConfig.openrouterPdfEngine ?? 'pdf-text',
+        }
+      : providerConfig;
+
+    this.client = createClient(enhancedConfig, 'fast');
+    this.providerConfig = enhancedConfig;
     this.workspaceDir = workspaceDir;
     this.sessionId = sessionId || `session_${Date.now()}`;
   }
@@ -242,7 +252,11 @@ export class AgentRuntime {
       const toolResponses: ChatMessage[] = [];
       
       // Categorize tools for execution strategy
-      const readOnlyTools = new Set(['read', 'ls', 'glob', 'grep', 'read_memory', 'search_memory', 'list_memory', 'list_skills']);
+      const readOnlyTools = new Set([
+        'read', 'read_file', 'read_many_files', 'ls', 'glob', 'grep',
+        'read_memory', 'search_memory', 'list_memory', 'get_memory_context',
+        'list_skills', 'todoread', 'web_fetch', 'web_search', 'question',
+      ]);
       
       // Separate read-only tools (can run in parallel) from write tools (run sequentially)
       const parallelCalls = result.functionCalls.filter(fc => readOnlyTools.has(fc.name));
@@ -301,6 +315,9 @@ export class AgentRuntime {
     fc: { id: string; name: string; args: Record<string, unknown> },
     signal?: AbortSignal
   ): Promise<ChatMessage> {
+    // Debug: log raw tool call from the model
+    console.log(`[tool:${fc.name}] raw args from model:`, JSON.stringify(fc.args, null, 2));
+
     const tool = registry.get(fc.name);
     const toolCallBlockId = `tool_call_${fc.id}`;
     const toolResultBlockId = `tool_result_${fc.id}`;
@@ -320,9 +337,10 @@ export class AgentRuntime {
     this.emitBlock(createToolCallBlock(toolCallBlockId, fc.name, fc.args, 'executing'));
 
     // Load JIT memory for file access tools
-    if (this.contextManager && ['read', 'write', 'edit', 'ls'].includes(fc.name)) {
-      const pathArg = (fc.args as { filePath?: string; path?: string }).filePath || 
-                      (fc.args as { filePath?: string; path?: string }).path;
+    if (this.contextManager && ['read', 'read_many_files', 'write', 'edit', 'multiedit', 'replace', 'ls'].includes(fc.name)) {
+      const pathArg = (fc.args as { filePath?: string; path?: string; file_path?: string }).filePath
+        || (fc.args as { filePath?: string; path?: string; file_path?: string }).path
+        || (fc.args as { filePath?: string; path?: string; file_path?: string }).file_path;
       if (pathArg) {
         await this.contextManager.loadJitMemory(pathArg);
       }
@@ -351,6 +369,27 @@ export class AgentRuntime {
         'completed',
         executionTime
       ));
+
+      // If the tool returned attachments (images, PDFs), include them as
+      // multipart content so the LLM can see the binary data.
+      if (toolResult.attachments && toolResult.attachments.length > 0) {
+        const parts: Array<{ type: string; text?: string; [key: string]: unknown }> = [
+          { type: 'text', text: JSON.stringify({ result: toolResult.output }) },
+        ];
+        for (const att of toolResult.attachments) {
+          parts.push({
+            type: 'inline_data',
+            mime: att.mime,
+            name: att.name,
+            data: att.data,
+          });
+        }
+        return {
+          role: 'tool',
+          tool_call_id: fc.id,
+          content: parts,
+        };
+      }
 
       return {
         role: 'tool',

@@ -10,6 +10,16 @@ export type LLMProvider = 'gemini' | 'openrouter';
 export interface ProviderConfig {
   provider: LLMProvider;
   apiKey: string;
+  /**
+   * Optional OpenRouter request logging path.
+   * If set, requests are appended to this file.
+   */
+  logPath?: string;
+  /**
+   * Optional OpenRouter PDF engine configuration.
+   * When set, enables the OpenRouter file-parser plugin for PDFs.
+   */
+  openrouterPdfEngine?: 'pdf-text' | 'mistral-ocr' | 'native' | '';
 }
 
 /** Message format (OpenAI-compatible) */

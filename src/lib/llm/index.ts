@@ -65,7 +65,10 @@ export function createClient(config: ProviderConfig, modelType: ModelType = 'fas
     case 'gemini':
       return new GeminiClient(config.apiKey, model);
     case 'openrouter':
-      return new OpenRouterClient(config.apiKey, model);
+      return new OpenRouterClient(config.apiKey, model, {
+        logPath: config.logPath,
+        pdfEngine: config.openrouterPdfEngine,
+      });
     default:
       throw new Error(`Unknown provider: ${config.provider}`);
   }
@@ -81,7 +84,10 @@ export function createSummarizationClient(config: ProviderConfig): LLMClient {
     case 'gemini':
       return new GeminiClient(config.apiKey, model);
     case 'openrouter':
-      return new OpenRouterClient(config.apiKey, model);
+      return new OpenRouterClient(config.apiKey, model, {
+        logPath: config.logPath,
+        pdfEngine: config.openrouterPdfEngine,
+      });
     default:
       throw new Error(`Unknown provider: ${config.provider}`);
   }
@@ -97,7 +103,10 @@ export function createCompressionClient(config: ProviderConfig): LLMClient {
     case 'gemini':
       return new GeminiClient(config.apiKey, model);
     case 'openrouter':
-      return new OpenRouterClient(config.apiKey, model);
+      return new OpenRouterClient(config.apiKey, model, {
+        logPath: config.logPath,
+        pdfEngine: config.openrouterPdfEngine,
+      });
     default:
       throw new Error(`Unknown provider: ${config.provider}`);
   }

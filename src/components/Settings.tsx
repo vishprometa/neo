@@ -107,7 +107,7 @@ export function Settings({
                 alignItems: 'center',
                 gap: '6px',
                 padding: '8px 14px',
-                borderRadius: '6px',
+                borderRadius: 'calc(var(--radius) - 6px)',
                 border: provider === 'gemini' 
                   ? '1px solid hsl(var(--primary))' 
                   : '1px solid hsl(var(--border))',
@@ -135,7 +135,7 @@ export function Settings({
                 alignItems: 'center',
                 gap: '6px',
                 padding: '8px 14px',
-                borderRadius: '6px',
+                borderRadius: 'calc(var(--radius) - 6px)',
                 border: provider === 'openrouter' 
                   ? '1px solid hsl(var(--primary))' 
                   : '1px solid hsl(var(--border))',

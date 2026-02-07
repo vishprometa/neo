@@ -47,7 +47,7 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 4px;
+  border-radius: calc(var(--radius) - 8px);
   cursor: pointer;
   color: hsl(var(--muted-foreground));
   transition: all 0.15s ease;
@@ -83,7 +83,7 @@
 
 .log-entry {
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: calc(var(--radius) - 6px);
   font-size: 12px;
   line-height: 1.5;
   border-left: 3px solid transparent;
