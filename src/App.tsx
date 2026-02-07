@@ -138,7 +138,7 @@ function App() {
   if (showSettings) {
     return (
       <div className={`app-container ${isFocused ? 'focused' : 'unfocused'}`}>
-        <Titlebar isFocused={isFocused} onNewWindow={handleNewWindow} />
+        <Titlebar isFocused={isFocused} />
         <Settings
           currentApiKey={apiKey}
           currentProvider={provider}
@@ -155,7 +155,7 @@ function App() {
   if (!workspaceDir) {
     return (
       <div className={`app-container ${isFocused ? 'focused' : 'unfocused'}`}>
-        <Titlebar isFocused={isFocused} onNewWindow={handleNewWindow} />
+        <Titlebar isFocused={isFocused} />
         <WelcomeView
           apiKey={apiKey}
           provider={provider}

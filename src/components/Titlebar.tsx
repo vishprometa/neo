@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useLayoutEffect } from 'react';
-import { Settings, FolderOpen, PanelLeft, MessageSquare, Brain, Plus } from 'lucide-react';
+import { Settings, FolderOpen, PanelLeft, MessageSquare, Brain, Files } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const isMac = () => {
@@ -99,8 +99,9 @@ interface TitlebarProps {
   onOpenSettings?: () => void;
   onNewThread?: () => void;
   onIndexMemory?: () => void;
-  onNewWindow?: () => void;
+  onToggleFileTree?: () => void;
   isSidebarOpen?: boolean;
+  isFileTreeOpen?: boolean;
   isFocused?: boolean;
   isSyncing?: boolean;
 }
@@ -112,8 +113,9 @@ export function Titlebar({
   onOpenSettings,
   onNewThread,
   onIndexMemory,
-  onNewWindow,
+  onToggleFileTree,
   isSidebarOpen = false,
+  isFileTreeOpen = false,
   isFocused = true,
   isSyncing = false,
 }: TitlebarProps) {
@@ -224,13 +226,13 @@ export function Titlebar({
             <MessageSquare size={14} />
           </button>
         )}
-        {onNewWindow && (
+        {onToggleFileTree && (
           <button
-            className="titlebar-btn"
-            onClick={onNewWindow}
-            title="New Window (⌘N)"
+            className={`titlebar-btn ${isFileTreeOpen ? 'active' : ''}`}
+            onClick={onToggleFileTree}
+            title="Toggle Files"
           >
-            <Plus size={14} />
+            <Files size={14} />
           </button>
         )}
         {onOpenSettings && (

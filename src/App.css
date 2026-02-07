@@ -269,15 +269,16 @@ body {
   background: hsl(var(--secondary) / 0.4);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-right: 1px solid hsl(var(--border) / 0.4);
+  border-left: 1px solid hsl(var(--border) / 0.4);
   overflow: hidden;
   transition: width 0.15s ease;
   flex-shrink: 0;
+  order: 1; /* Place after chat container in flexbox */
 }
 
 .file-sidebar.closed {
   width: 0 !important;
-  border-right: none;
+  border-left: none;
 }
 
 .sidebar-content {
@@ -2345,4 +2346,56 @@ body {
   text-align: center;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
+}
+
+/* Context Menu */
+.context-menu {
+  min-width: 160px;
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  padding: 4px;
+  box-shadow: 0 8px 24px hsl(0 0% 0% / 0.2);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.context-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: calc(var(--radius) - 4px);
+  cursor: pointer;
+  transition: background 0.1s ease;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+}
+
+.context-menu-item:hover:not(.disabled) {
+  background: hsl(var(--accent));
+}
+
+.context-menu-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.context-menu-item-icon {
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+
+.context-menu-item-label {
+  flex: 1;
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: hsl(var(--border));
+  margin: 4px 0;
 }

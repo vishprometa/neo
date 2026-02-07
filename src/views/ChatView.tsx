@@ -4,11 +4,12 @@ import { Titlebar } from '../components/Titlebar';
 import { ChatInput } from '../components/ChatInput';
 import { MessageBlock } from '../components/MessageBlock';
 import { ThreadSidebar } from '../components/ThreadSidebar';
+import { FileSidebar } from '../components/FileSidebar';
 import { DeleteThreadDialog } from '../components/DeleteThreadDialog';
 import { SyncStatus } from '../components/SyncStatus';
 import { LogSidebar } from '../components/LogSidebar';
 import type { LogEntry } from '../hooks/useMemorySync';
-import { useThreads, useChat } from '../hooks';
+import { useThreads, useChat, useFileTree } from '../hooks';
 import type { SyncProgress } from '../lib/memory';
 import type { ProviderConfig } from '../lib/llm';
 import { getModelDisplayName } from '../lib/llm';
@@ -54,6 +55,8 @@ export function ChatView({
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('threads');
   const [pendingDeleteThreadId, setPendingDeleteThreadId] = useState<string | null>(null);
   const [isLogSidebarOpen, setIsLogSidebarOpen] = useState(false);
+  const [isFileTreeOpen, setIsFileTreeOpen] = useState(false);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>(undefined);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -77,6 +80,11 @@ export function ChatView({
   } = useThreads(workspaceDir);
 
   // Memory sync is managed in App and passed down.
+
+  // File tree
+  const { files: fileTreeFiles, isLoading: isFileTreeLoading, refresh: refreshFileTree } = useFileTree({
+    workspaceDir,
+  });
 
   // Handler for opening Neo memory folder
   const handleOpenNeoMemory = useCallback(async () => {
@@ -182,8 +190,9 @@ export function ChatView({
         onOpenSettings={onOpenSettings}
         onNewThread={handleNewThread}
         onIndexMemory={resync}
-        onNewWindow={onNewWindow}
+        onToggleFileTree={() => setIsFileTreeOpen((prev) => !prev)}
         isSidebarOpen={isSidebarOpen}
+        isFileTreeOpen={isFileTreeOpen}
         isFocused={isFocused}
         isSyncing={isSyncing}
       />
@@ -330,6 +339,15 @@ export function ChatView({
             workspaceDir={workspaceDir}
           />
         </div>
+
+        <FileSidebar
+          isOpen={isFileTreeOpen}
+          workspaceDir={workspaceDir}
+          files={fileTreeFiles}
+          selectedPath={selectedFilePath}
+          onSelectFile={setSelectedFilePath}
+          onClose={() => setIsFileTreeOpen(false)}
+        />
       </div>
 
       <DeleteThreadDialog

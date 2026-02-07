@@ -1,16 +1,17 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Folder,
   FileText,
   ChevronRight,
   ChevronDown,
-  FolderPlus,
-  Plus,
   Search,
-  MoreHorizontal,
-  Trash2,
-  PencilLine,
+  ExternalLink,
+  FolderOpen,
+  Copy,
 } from 'lucide-react';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu';
+import { open } from '@tauri-apps/plugin-shell';
+import { join, dirname } from '@tauri-apps/api/path';
 
 interface FileItem {
   id: string;
@@ -36,6 +37,7 @@ interface TreeItemProps {
   onSelect: (path: string) => void;
   expandedPaths: Set<string>;
   onToggleExpand: (path: string) => void;
+  onContextMenu: (e: React.MouseEvent, item: FileItem) => void;
 }
 
 function TreeItem({
@@ -45,6 +47,7 @@ function TreeItem({
   onSelect,
   expandedPaths,
   onToggleExpand,
+  onContextMenu,
 }: TreeItemProps) {
   const isExpanded = expandedPaths.has(item.path);
   const isSelected = selectedPath === item.path;
@@ -58,12 +61,19 @@ function TreeItem({
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onContextMenu(e, item);
+  };
+
   return (
     <div>
       <div
         className={`sidebar-item ${isSelected ? 'active' : ''}`}
         style={{ paddingLeft: `${12 + depth * 12}px` }}
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
       >
         {isFolder && (
           <span className="sidebar-item-chevron">
@@ -86,6 +96,7 @@ function TreeItem({
               onSelect={onSelect}
               expandedPaths={expandedPaths}
               onToggleExpand={onToggleExpand}
+              onContextMenu={onContextMenu}
             />
           ))}
         </div>
@@ -109,7 +120,7 @@ export function FileSidebar({
   const asideRef = useRef<HTMLDivElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
-      const raw = localStorage.getItem('neo.sidebar.width');
+      const raw = localStorage.getItem('neo.filesidebar.width');
       const n = Number(raw);
       if (Number.isFinite(n) && n >= MIN_WIDTH && n <= MAX_WIDTH) return n;
     } catch {}
@@ -118,13 +129,108 @@ export function FileSidebar({
 
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
+  const [contextMenu, setContextMenu] = useState<{
+    isOpen: boolean;
+    position: { x: number; y: number };
+    item: FileItem | null;
+  }>({ isOpen: false, position: { x: 0, y: 0 }, item: null });
 
   useEffect(() => {
     try {
-      document.documentElement.style.setProperty('--sidebar-width', `${sidebarWidth}px`);
-      localStorage.setItem('neo.sidebar.width', String(sidebarWidth));
+      document.documentElement.style.setProperty('--file-sidebar-width', `${sidebarWidth}px`);
+      localStorage.setItem('neo.filesidebar.width', String(sidebarWidth));
     } catch {}
   }, [sidebarWidth]);
+
+  // Handle context menu open
+  const handleContextMenu = useCallback((e: React.MouseEvent, item: FileItem) => {
+    setContextMenu({
+      isOpen: true,
+      position: { x: e.clientX, y: e.clientY },
+      item,
+    });
+  }, []);
+
+  // Close context menu
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(prev => ({ ...prev, isOpen: false }));
+  }, []);
+
+  // Open file with default app
+  const handleOpenWithDefault = useCallback(async () => {
+    if (!contextMenu.item) return;
+    try {
+      const fullPath = await join(workspaceDir, contextMenu.item.path);
+      await open(fullPath);
+    } catch (err) {
+      console.error('Failed to open file:', err);
+    }
+  }, [contextMenu.item, workspaceDir]);
+
+  // Reveal in Finder (macOS)
+  const handleRevealInFinder = useCallback(async () => {
+    if (!contextMenu.item) return;
+    try {
+      const fullPath = await join(workspaceDir, contextMenu.item.path);
+      // Use 'open -R' to reveal file in Finder on macOS
+      await open(`file://${fullPath}`, 'open');
+    } catch (err) {
+      console.error('Failed to reveal in Finder:', err);
+      // Fallback: open the parent directory
+      try {
+        const fullPath = await join(workspaceDir, contextMenu.item.path);
+        const parentDir = await dirname(fullPath);
+        await open(parentDir);
+      } catch (fallbackErr) {
+        console.error('Failed to open parent directory:', fallbackErr);
+      }
+    }
+  }, [contextMenu.item, workspaceDir]);
+
+  // Copy path to clipboard
+  const handleCopyPath = useCallback(async () => {
+    if (!contextMenu.item) return;
+    try {
+      const fullPath = await join(workspaceDir, contextMenu.item.path);
+      await navigator.clipboard.writeText(fullPath);
+    } catch (err) {
+      console.error('Failed to copy path:', err);
+    }
+  }, [contextMenu.item, workspaceDir]);
+
+  // Build context menu items
+  const contextMenuItems: ContextMenuItem[] = useMemo(() => {
+    if (!contextMenu.item) return [];
+    
+    const items: ContextMenuItem[] = [
+      {
+        id: 'open',
+        label: contextMenu.item.type === 'folder' ? 'Open Folder' : 'Open with Default App',
+        icon: ExternalLink,
+        onClick: handleOpenWithDefault,
+      },
+      {
+        id: 'reveal',
+        label: 'Reveal in Finder',
+        icon: FolderOpen,
+        onClick: handleRevealInFinder,
+      },
+      {
+        id: 'separator-1',
+        label: '',
+        separator: true,
+        onClick: () => {},
+      },
+      {
+        id: 'copy-path',
+        label: 'Copy Path',
+        icon: Copy,
+        onClick: handleCopyPath,
+      },
+    ];
+
+    return items;
+  }, [contextMenu.item, handleOpenWithDefault, handleRevealInFinder, handleCopyPath]);
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -134,7 +240,8 @@ export function FileSidebar({
     asideRef.current?.classList?.add('resizing');
 
     const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startX;
+      // For right-side sidebar, dragging left increases width
+      const dx = startX - ev.clientX;
       const next = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startW + dx));
       setSidebarWidth(next);
     };
@@ -194,6 +301,15 @@ export function FileSidebar({
       className={`file-sidebar ${isOpen ? 'open' : 'closed'}`}
       style={{ width: isOpen ? sidebarWidth : 0 }}
     >
+      <div
+        className="sidebar-resizer sidebar-resizer-left"
+        onMouseDown={startResize}
+        onDoubleClick={() => setSidebarWidth(DEFAULT_WIDTH)}
+        title="Drag to resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+      />
       <div className="sidebar-content">
         <div className="sidebar-header">
           <span className="sidebar-header-title">{folderName}</span>
@@ -226,20 +342,18 @@ export function FileSidebar({
                 onSelect={handleSelect}
                 expandedPaths={expandedPaths}
                 onToggleExpand={handleToggleExpand}
+                onContextMenu={handleContextMenu}
               />
             ))
           )}
         </div>
       </div>
 
-      <div
-        className="sidebar-resizer"
-        onMouseDown={startResize}
-        onDoubleClick={() => setSidebarWidth(DEFAULT_WIDTH)}
-        title="Drag to resize"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize sidebar"
+      <ContextMenu
+        isOpen={contextMenu.isOpen}
+        position={contextMenu.position}
+        items={contextMenuItems}
+        onClose={closeContextMenu}
       />
     </aside>
   );
