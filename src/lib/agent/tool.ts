@@ -80,9 +80,11 @@ function normalizeParamNames(obj: unknown): unknown {
  */
 const PARAM_ALIASES: Record<string, Record<string, string>> = {
   read: { path: 'filePath' },
+  read_file: { path: 'file_path', filePath: 'file_path' },
   write: { path: 'filePath' },
   edit: { path: 'filePath' },
   multiedit: { path: 'filePath' },
+  replace: { path: 'filePath', file_path: 'filePath' },
   read_many_files: { files: 'paths', filePaths: 'paths', file_paths: 'paths' },
 };
 

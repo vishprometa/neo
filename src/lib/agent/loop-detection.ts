@@ -75,24 +75,27 @@ function extractErrors(messages: LLMMessage[]): string[] {
 }
 
 /**
- * Calculate similarity between two strings (simple implementation)
+ * Calculate similarity between two strings using Jaccard similarity on word tokens.
+ * More meaningful than character overlap — treats strings as sets of words.
  */
 function calculateSimilarity(a: string, b: string): number {
   if (a === b) return 1;
   if (!a || !b) return 0;
 
-  const longer = a.length > b.length ? a : b;
-  const shorter = a.length > b.length ? b : a;
+  const tokenize = (s: string) => new Set(s.toLowerCase().split(/\s+/).filter(Boolean));
+  const setA = tokenize(a);
+  const setB = tokenize(b);
 
-  // Simple character overlap metric
-  let matches = 0;
-  for (let i = 0; i < shorter.length; i++) {
-    if (longer.includes(shorter[i])) {
-      matches++;
-    }
+  if (setA.size === 0 && setB.size === 0) return 1;
+  if (setA.size === 0 || setB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const token of setA) {
+    if (setB.has(token)) intersection++;
   }
 
-  return matches / longer.length;
+  const union = setA.size + setB.size - intersection;
+  return union === 0 ? 0 : intersection / union;
 }
 
 /**
@@ -128,6 +131,24 @@ function checkToolRepetition(
       return {
         isLooping: true,
         description: `Tool "${recentCalls[0].name}" was called ${maxConsecutive} times with very similar arguments`,
+      };
+    }
+  }
+
+  // Check for oscillation (A-B-A-B pattern)
+  if (toolCalls.length >= 4) {
+    const last4 = toolCalls.slice(-4);
+    const isOscillating =
+      last4[0].name === last4[2].name &&
+      last4[1].name === last4[3].name &&
+      last4[0].name !== last4[1].name &&
+      calculateSimilarity(last4[0].args, last4[2].args) > 0.8 &&
+      calculateSimilarity(last4[1].args, last4[3].args) > 0.8;
+
+    if (isOscillating) {
+      return {
+        isLooping: true,
+        description: `Oscillating between "${last4[0].name}" and "${last4[1].name}" — alternating back and forth without progress`,
       };
     }
   }
@@ -194,11 +215,12 @@ export function detectLoop(
   const errors = extractErrors(messages);
   const errorLoop = checkErrorLoop(errors, maxConsecutiveErrors);
   if (errorLoop.isLooping) {
+    const lastError = errors.length > 0 ? errors[errors.length - 1] : '';
     return {
       isLooping: true,
       loopType: 'error_loop',
       description: errorLoop.description,
-      suggestion: 'The same error keeps occurring. Consider trying a different approach or asking the user for help.',
+      suggestion: `The same error keeps occurring: "${lastError}". Try a fundamentally different approach or ask the user for help with the question tool.`,
     };
   }
 

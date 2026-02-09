@@ -6,4 +6,4 @@ export { useFolderPicker } from './useFolderPicker';
 export { useKeyboardShortcuts } from './useKeyboardShortcuts';
 export { useWindowFocus } from './useWindowFocus';
 export { useFileSuggestions, type FileSuggestion } from './useFileSuggestions';
-export { useFileTree, type FileItem } from './useFileTree';
+export { useEditorDetection, type DetectedEditor } from './useEditorDetection';

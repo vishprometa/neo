@@ -65,7 +65,7 @@ export function MemoryBrowser({ workspaceDir, onResync, isSyncing }: MemoryBrows
 
         // Try to load journal entries
         try {
-          const journalContent = await readMemoryFile(workspaceDir, 'journal');
+          await readMemoryFile(workspaceDir, 'journal');
           // Journal entries are date-based files in journal/ folder
           // We'll detect them by trying to read recent dates
           const today = new Date();
@@ -158,7 +158,7 @@ export function MemoryBrowser({ workspaceDir, onResync, isSyncing }: MemoryBrows
           <Brain size={24} />
           <span className="memory-empty-title">No Memory Yet</span>
           <span className="memory-empty-text">
-            Index your workspace to build semantic memory
+            Sync your workspace to build memory
           </span>
           <button
             className="memory-empty-btn"
@@ -166,7 +166,7 @@ export function MemoryBrowser({ workspaceDir, onResync, isSyncing }: MemoryBrows
             disabled={isSyncing}
           >
             <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-            {isSyncing ? 'Indexing...' : 'Index Workspace'}
+            {isSyncing ? 'Syncing...' : 'Sync Workspace'}
           </button>
         </div>
       </div>

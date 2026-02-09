@@ -70,9 +70,9 @@ export function WelcomeView({
 
       <div className="welcome-content">
         <NeoLogo width={320} className="welcome-logo" />
-        <p className="welcome-subtitle">AI Coding Assistant</p>
+        <p className="welcome-subtitle">AI Coworking Assistant</p>
         <p className="welcome-subtitle-secondary">
-          Index your workspace for semantic memory
+          with persistent file-based memory
         </p>
 
         {!apiKey && (

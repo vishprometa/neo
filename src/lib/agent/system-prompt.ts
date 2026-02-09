@@ -126,6 +126,23 @@ You can invoke multiple tools in parallel when they are independent of each othe
 - Use **grep** for content search (regex-capable)
 - Use **glob** for finding files by name pattern
 - Use **search_memory** if memory is available for semantic search
+- **Pattern**: Use glob to find files, then grep to search content within them
+
+## Error Recovery
+
+When a tool call fails:
+1. **Read the error carefully** — don't retry the same call with the same arguments
+2. **Try a different approach** — if a file doesn't exist, use glob/ls to find the correct path
+3. **Check prerequisites** — if a shell command fails, verify dependencies are installed
+4. **Ask the user** — if you've tried 2+ approaches and still can't resolve it, use the question tool
+
+## Multi-Step Tasks
+
+For complex tasks:
+1. **Plan first** — briefly outline your approach before starting
+2. **Use todowrite** — break the task into trackable steps
+3. **Verify each step** — read files after editing, check command output after executing
+4. **Stay on track** — if you discover a related issue, note it but stay focused on the original task
 
 ## Workspace
 

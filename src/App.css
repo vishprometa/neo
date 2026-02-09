@@ -103,6 +103,28 @@ body {
   position: relative;
 }
 
+/* Grid background pattern (Cowork style) */
+.cowork-grid-bg {
+  position: relative;
+}
+
+.cowork-grid-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(hsl(var(--border) / 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--border) / 0.3) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.cowork-grid-bg > * {
+  position: relative;
+  z-index: 1;
+}
+
 /* Main layout */
 .app-layout {
   display: flex;
@@ -159,19 +181,90 @@ body {
   gap: 4px;
 }
 
-.titlebar-workspace {
+.titlebar-workspace-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: 2px;
+  padding: 3px 4px 3px 10px;
   background: hsl(var(--secondary));
   border-radius: calc(var(--radius) - 4px);
   font-size: 11px;
 }
 
-.titlebar-workspace-name {
-  color: hsl(var(--foreground));
+.titlebar-workspace-path {
+  color: hsl(var(--muted-foreground));
   font-weight: 500;
+  font-family: 'Geist Mono', 'SF Mono', 'Menlo', monospace;
+  font-size: 11px;
+  margin-right: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.titlebar-icon-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  border-radius: calc(var(--radius) - 6px);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.titlebar-icon-btn:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+
+/* Editor dropdown */
+.editor-dropdown {
+  position: relative;
+}
+
+.editor-dropdown-trigger {
+  width: auto;
+  padding: 0 4px;
+  gap: 2px;
+}
+
+.editor-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 160px;
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  z-index: 100;
+}
+
+.editor-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+  border-radius: calc(var(--radius) - 4px);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background 0.1s ease;
+}
+
+.editor-dropdown-item:hover {
+  background: hsl(var(--accent));
 }
 
 .titlebar-title {
@@ -262,145 +355,6 @@ body {
   color: hsl(var(--foreground));
 }
 
-/* File Sidebar */
-.file-sidebar {
-  display: flex;
-  height: 100%;
-  background: hsl(var(--secondary) / 0.4);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-left: 1px solid hsl(var(--border) / 0.4);
-  overflow: hidden;
-  transition: width 0.15s ease;
-  flex-shrink: 0;
-  order: 1; /* Place after chat container in flexbox */
-}
-
-.file-sidebar.closed {
-  width: 0 !important;
-  border-left: none;
-}
-
-.sidebar-content {
-  display: flex;
-  flex-direction: column;
-  width: var(--sidebar-width);
-  min-width: var(--sidebar-width);
-  overflow: hidden;
-}
-
-.sidebar-header {
-  padding: 10px 12px;
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-.sidebar-header-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: hsl(var(--muted-foreground));
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.sidebar-search {
-  padding: 8px 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-.sidebar-search-icon {
-  color: hsl(var(--muted-foreground));
-  flex-shrink: 0;
-}
-
-.sidebar-search-input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  font-size: 12px;
-  color: hsl(var(--foreground));
-  outline: none;
-}
-
-.sidebar-search-input::placeholder {
-  color: hsl(var(--muted-foreground));
-}
-
-.sidebar-tree {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px 0;
-}
-
-.sidebar-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 8px;
-  cursor: pointer;
-  font-size: 12px;
-  color: hsl(var(--foreground));
-  transition: background 0.1s ease;
-}
-
-.sidebar-item:hover {
-  background: hsl(var(--accent));
-}
-
-.sidebar-item.active {
-  background: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
-}
-
-.sidebar-item-chevron {
-  width: 14px;
-  height: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: hsl(var(--muted-foreground));
-}
-
-.sidebar-item-icon {
-  color: hsl(var(--muted-foreground));
-  flex-shrink: 0;
-}
-
-.sidebar-item-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-children {
-  /* nested items */
-}
-
-.sidebar-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 24px 12px;
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
-}
-
-.sidebar-resizer {
-  width: 4px;
-  cursor: col-resize;
-  background: transparent;
-  transition: background 0.15s ease;
-}
-
-.sidebar-resizer:hover,
-.file-sidebar.resizing .sidebar-resizer {
-  background: hsl(var(--ring));
-}
 
 /* Thread list sidebar */
 .thread-sidebar {
@@ -666,7 +620,7 @@ body {
   gap: 6px;
 }
 
-/* Empty state */
+/* Empty state (legacy) */
 .chat-empty {
   flex: 1;
   display: flex;
@@ -677,88 +631,166 @@ body {
   color: hsl(var(--muted-foreground));
 }
 
-.chat-empty-icon {
-  width: 48px;
-  height: 48px;
+/* Cowork-style empty state */
+.cowork-empty {
+  flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: hsl(var(--secondary));
-  border-radius: calc(var(--radius) + 2px);
-  font-size: 24px;
+  overflow-y: auto;
+  padding: 20px;
 }
 
-.chat-empty-title {
-  font-size: 14px;
+.cowork-empty-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 580px;
+  width: 100%;
+  gap: 12px;
+}
+
+.cowork-starburst {
+  animation: welcome-logo-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.cowork-empty-heading {
+  font-size: 24px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+  line-height: 1.25;
+  animation: welcome-stagger 0.4s ease-out 0.1s both;
+}
+
+/* Info banner */
+.cowork-info-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  width: 100%;
+  background: hsl(var(--secondary) / 0.5);
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: calc(var(--radius));
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.4;
+  animation: welcome-stagger 0.4s ease-out 0.15s both;
+}
+
+.cowork-info-banner svg {
+  flex-shrink: 0;
+  color: hsl(var(--ring));
+}
+
+.cowork-info-link {
+  display: inline;
+  padding: 0;
+  margin-left: 4px;
+  border: none;
+  background: none;
+  color: hsl(var(--ring));
+  font-size: 12px;
   font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cowork-info-link:hover {
   color: hsl(var(--foreground));
 }
 
-.chat-empty-subtitle {
-  font-size: 12px;
+/* Task suggestion cards */
+.cowork-tasks {
+  width: 100%;
+  padding: 14px;
+  background: hsl(var(--secondary) / 0.3);
+  border: 1px solid hsl(var(--border) / 0.4);
+  border-radius: calc(var(--radius));
+  animation: welcome-stagger 0.4s ease-out 0.2s both;
 }
 
-.chat-empty-action {
-  display: inline-flex;
+.cowork-tasks-header {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  padding: 6px 10px;
+  justify-content: space-between;
   font-size: 12px;
   font-weight: 500;
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.12);
-  border: 1px solid hsl(var(--primary) / 0.2);
-  border-radius: calc(var(--radius) - 2px);
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.chat-empty-action:hover {
-  background: hsl(var(--primary) / 0.18);
-  border-color: hsl(var(--primary) / 0.3);
-}
-
-.chat-empty-note {
-  font-size: 11px;
   color: hsl(var(--muted-foreground));
-  text-align: center;
-  max-width: 280px;
+  margin-bottom: 10px;
+}
+
+.cowork-tasks-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cowork-tasks-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.cowork-task-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px;
+  background: hsl(var(--secondary) / 0.7);
+  border: 1px solid hsl(var(--border) / 0.4);
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: hsl(var(--foreground));
+  font-size: 12px;
+  font-weight: 400;
+  text-align: left;
+}
+
+.cowork-task-card:hover {
+  background: hsl(var(--secondary));
+  border-color: hsl(var(--border));
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.cowork-task-card svg {
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
 }
 
 /* Input area */
 .chat-input-container {
-  padding: 12px 16px;
-  border-top: 1px solid hsl(var(--border) / 0.3);
-  background: hsl(var(--background) / 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  padding: 12px 16px 16px;
+  border-top: none;
+  background: transparent;
   position: relative;
 }
 
 .chat-input-wrapper {
-  max-width: 720px;
+  max-width: 640px;
   margin: 0 auto;
 }
 
 .chat-input-main-box {
   display: flex;
   flex-direction: column;
-  background: hsl(var(--secondary) / 0.8);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: hsl(var(--secondary) / 0.7);
   border: 1px solid hsl(var(--border) / 0.5);
-  border-radius: var(--radius);
+  border-radius: calc(var(--radius) + 2px);
   transition: border-color 0.15s ease, box-shadow 0.2s ease;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.1);
 }
 
 .chat-input-main-box:focus-within {
-  border-color: hsl(var(--ring));
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  border-color: hsl(var(--ring) / 0.5);
+  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.15);
 }
 
 .chat-input-main-box:hover {
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.15);
 }
 
 .chat-input-textarea-wrapper {
@@ -960,6 +992,87 @@ body {
 
 .chat-send-btn-cancel:hover {
   background: hsl(0 70% 50%);
+}
+
+/* Cowork-style "Let's go" button */
+.cowork-go-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: hsl(212 92% 45%);
+  color: hsl(0 0% 98%);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.cowork-go-btn:hover:not(:disabled) {
+  background: hsl(212 92% 50%);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
+}
+
+.cowork-go-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.cowork-go-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Cowork folder indicator */
+.cowork-folder-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  font-size: 11px;
+  font-family: 'Geist Mono', 'SF Mono', monospace;
+  color: hsl(var(--muted-foreground));
+  background: transparent;
+  border: none;
+  max-width: 200px;
+  overflow: hidden;
+}
+
+.cowork-folder-indicator span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cowork-folder-indicator svg {
+  color: hsl(var(--muted-foreground));
+  flex-shrink: 0;
+}
+
+/* Cowork model button */
+.cowork-model-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 400;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+}
+
+.cowork-model-btn:hover {
+  background: hsl(var(--foreground) / 0.05);
+  color: hsl(var(--foreground));
 }
 
 /* Legacy support - keep old classes working */
@@ -1575,6 +1688,27 @@ body {
   border-top-color: hsl(var(--ring));
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+.sync-status-stop {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: hsl(var(--foreground) / 0.08);
+  color: hsl(var(--muted-foreground));
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.sync-status-stop:hover {
+  background: hsl(var(--destructive) / 0.15);
+  color: hsl(var(--destructive));
 }
 
 @keyframes spin {

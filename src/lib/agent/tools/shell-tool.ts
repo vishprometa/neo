@@ -10,6 +10,26 @@ import { Command } from '@tauri-apps/plugin-shell';
 const MAX_OUTPUT_LENGTH = 50_000;
 const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes like erpai-cli
 
+/**
+ * Wrap a command so it inherits the user's login shell PATH.
+ * Tauri's shell plugin spawns a bare `sh` which doesn't source
+ * ~/.zshrc, ~/.bash_profile, etc., so tools like pip, node, python
+ * installed via Homebrew/pyenv/nvm won't be found (exit code 127).
+ *
+ * We source common profile files to pick up the user's PATH.
+ */
+function wrapWithLoginEnv(command: string): string {
+  // Source files in order of precedence; `|| true` so missing files don't error
+  return [
+    '[ -f "$HOME/.zprofile" ] && . "$HOME/.zprofile" || true',
+    '[ -f "$HOME/.zshrc" ] && . "$HOME/.zshrc" || true',
+    '[ -f "$HOME/.bash_profile" ] && . "$HOME/.bash_profile" || true',
+    '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc" || true',
+    '[ -f "$HOME/.profile" ] && . "$HOME/.profile" || true',
+    command,
+  ].join('; ');
+}
+
 /** Commands that are always blocked for safety */
 const BLOCKED_COMMANDS = new Set([
   'rm -rf /',
@@ -92,63 +112,52 @@ SAFETY: This tool can modify your system. Use with caution.
     }
 
     try {
-      const shellCommand = Command.create('sh', ['-c', command], { cwd });
-
-      let stdout = '';
-      let stderr = '';
-
-      shellCommand.stdout.on('data', (data) => {
-        stdout += data;
-        if (stdout.length > MAX_OUTPUT_LENGTH) {
-          stdout = stdout.slice(0, MAX_OUTPUT_LENGTH);
-        }
-      });
-
-      shellCommand.stderr.on('data', (data) => {
-        stderr += data;
-        if (stderr.length > MAX_OUTPUT_LENGTH) {
-          stderr = stderr.slice(0, MAX_OUTPUT_LENGTH);
-        }
-      });
+      const shellCommand = Command.create('sh', ['-c', wrapWithLoginEnv(command)], { cwd });
 
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          shellCommand.kill();
-          reject(new Error(`Command timed out after ${timeout}ms`));
-        }, timeout);
+        setTimeout(() => reject(new Error(`Command timed out after ${timeout}ms`)), timeout);
       });
 
-      const execPromise = shellCommand.execute();
-      const result = await Promise.race([execPromise, timeoutPromise]);
+      // execute() buffers all output and returns it — event listeners
+      // (stdout.on/stderr.on) only work with spawn(), not execute().
+      const result = await Promise.race([shellCommand.execute(), timeoutPromise]);
 
-      // Build output
-      let output = '';
+      let stdout = typeof result.stdout === 'string'
+        ? result.stdout
+        : new TextDecoder().decode(result.stdout);
+      let stderr = typeof result.stderr === 'string'
+        ? result.stderr
+        : new TextDecoder().decode(result.stderr);
 
-      if (stdout) {
-        output += stdout;
-        if (stdout.length >= MAX_OUTPUT_LENGTH) {
-          output += '\n(stdout truncated)';
-        }
+      // Truncate if needed
+      if (stdout.length > MAX_OUTPUT_LENGTH) {
+        stdout = stdout.slice(0, MAX_OUTPUT_LENGTH) + '\n(stdout truncated)';
       }
-
-      if (stderr) {
-        if (output) output += '\n\n';
-        output += `STDERR:\n${stderr}`;
-        if (stderr.length >= MAX_OUTPUT_LENGTH) {
-          output += '\n(stderr truncated)';
-        }
-      }
-
-      if (!output) {
-        output = '(no output)';
+      if (stderr.length > MAX_OUTPUT_LENGTH) {
+        stderr = stderr.slice(0, MAX_OUTPUT_LENGTH) + '\n(stderr truncated)';
       }
 
       const exitCode = result.code;
       const signal = result.signal;
 
-      let status = '';
+      // Build output — always include stderr when the command fails
+      let output = '';
+      if (stdout.trim()) {
+        output += stdout;
+      }
+      if (stderr.trim()) {
+        if (output) output += '\n\n';
+        output += exitCode !== 0 ? `ERROR:\n${stderr}` : `STDERR:\n${stderr}`;
+      }
+      if (!output) {
+        output = exitCode !== 0
+          ? `Command failed with exit code ${exitCode} (no output captured)`
+          : '(no output)';
+      }
+
+      let status = `\n\n[cwd: ${cwd}]`;
       if (exitCode !== 0) {
-        status = `\n\n[Exit code: ${exitCode}]`;
+        status += `\n[Exit code: ${exitCode}]`;
       }
       if (signal) {
         status += `\n[Signal: ${signal}]`;

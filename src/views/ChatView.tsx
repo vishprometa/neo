@@ -1,15 +1,16 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Brain, X, FolderOpen, StopCircle } from 'lucide-react';
+import { Brain, X, FolderOpen, StopCircle, ClipboardList, FileText, Sparkles, Search } from 'lucide-react';
 import { Titlebar } from '../components/Titlebar';
 import { ChatInput } from '../components/ChatInput';
 import { MessageBlock } from '../components/MessageBlock';
 import { ThreadSidebar } from '../components/ThreadSidebar';
-import { FileSidebar } from '../components/FileSidebar';
 import { DeleteThreadDialog } from '../components/DeleteThreadDialog';
 import { SyncStatus } from '../components/SyncStatus';
 import { LogSidebar } from '../components/LogSidebar';
+import { StarburstIcon } from '../components/StarburstIcon';
 import type { LogEntry } from '../hooks/useMemorySync';
-import { useThreads, useChat, useFileTree } from '../hooks';
+import { useThreads, useChat } from '../hooks';
+import { useEditorDetection } from '../hooks/useEditorDetection';
 import type { SyncProgress } from '../lib/memory';
 import type { ProviderConfig } from '../lib/llm';
 import { getModelDisplayName } from '../lib/llm';
@@ -40,7 +41,7 @@ export function ChatView({
   providerConfig,
   isFocused,
   onOpenSettings,
-  onNewWindow,
+  onNewWindow: _onNewWindow,
   error,
   setError,
   logs,
@@ -55,8 +56,6 @@ export function ChatView({
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('threads');
   const [pendingDeleteThreadId, setPendingDeleteThreadId] = useState<string | null>(null);
   const [isLogSidebarOpen, setIsLogSidebarOpen] = useState(false);
-  const [isFileTreeOpen, setIsFileTreeOpen] = useState(false);
-  const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>(undefined);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -64,7 +63,6 @@ export function ChatView({
   const {
     threads,
     activeThreadId,
-    activeThread,
     messages,
     setMessages,
     selectThread,
@@ -79,12 +77,8 @@ export function ChatView({
     cancelRename,
   } = useThreads(workspaceDir);
 
-  // Memory sync is managed in App and passed down.
-
-  // File tree
-  const { files: fileTreeFiles, isLoading: isFileTreeLoading, refresh: refreshFileTree } = useFileTree({
-    workspaceDir,
-  });
+  // Editor detection
+  const { editors, openInEditor, openInFinder, openInTerminal, finderIcon, terminalIcon } = useEditorDetection();
 
   // Handler for opening Neo memory folder
   const handleOpenNeoMemory = useCallback(async () => {
@@ -185,16 +179,19 @@ export function ChatView({
     <>
       <Titlebar
         workspaceDir={workspaceDir}
-        title={activeThread?.title}
         onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
         onOpenSettings={onOpenSettings}
         onNewThread={handleNewThread}
         onIndexMemory={resync}
-        onToggleFileTree={() => setIsFileTreeOpen((prev) => !prev)}
         isSidebarOpen={isSidebarOpen}
-        isFileTreeOpen={isFileTreeOpen}
         isFocused={isFocused}
         isSyncing={isSyncing}
+        editors={editors}
+        onOpenInEditor={(editor) => openInEditor(editor, workspaceDir)}
+        onOpenInFinder={() => openInFinder(workspaceDir)}
+        onOpenInTerminal={() => openInTerminal(workspaceDir)}
+        finderIcon={finderIcon}
+        terminalIcon={terminalIcon}
       />
 
       <div className="app-layout">
@@ -221,67 +218,107 @@ export function ChatView({
 
         {/* Chat area */}
         <div className="chat-container">
-          <div className="chat-header">
-            <span className="chat-header-badge">
-              {getModelDisplayName(providerConfig.provider, selectedModel)}
-            </span>
-            <span className="chat-header-badge">{messages.length} messages</span>
-            {toolCallCount > 0 && (
-              <span className="chat-header-badge">{toolCallCount} tool calls</span>
-            )}
-            {isSyncing ? (
+          {messages.length > 0 && (
+            <div className="chat-header">
+              <span className="chat-header-badge">
+                {getModelDisplayName(providerConfig.provider, selectedModel)}
+              </span>
+              <span className="chat-header-badge">{messages.length} messages</span>
+              {toolCallCount > 0 && (
+                <span className="chat-header-badge">{toolCallCount} tool calls</span>
+              )}
+              {isSyncing ? (
+                <button
+                  className="chat-header-action chat-header-action-stop"
+                  onClick={stopSync}
+                  title="Stop indexing"
+                >
+                  <StopCircle size={12} />
+                  Stop Indexing
+                </button>
+              ) : (
+                <button className="chat-header-action" onClick={resync} title="Index workspace files">
+                  <Brain size={12} />
+                  Index Files
+                </button>
+              )}
               <button
-                className="chat-header-action chat-header-action-stop"
-                onClick={stopSync}
-                title="Stop indexing"
+                className="chat-header-action"
+                onClick={handleOpenNeoMemory}
+                title="Open Neo memory folder"
               >
-                <StopCircle size={12} />
-                Stop Indexing
+                <FolderOpen size={12} />
+                Open Memory
               </button>
-            ) : (
-              <button className="chat-header-action" onClick={resync} title="Index workspace files">
-                <Brain size={12} />
-                Index Files
+              <button
+                className="chat-header-action"
+                onClick={() => setIsLogSidebarOpen(prev => !prev)}
+                title="Toggle logs"
+              >
+                Logs {isLogSidebarOpen ? '▼' : '▶'}
               </button>
-            )}
-            <button
-              className="chat-header-action"
-              onClick={handleOpenNeoMemory}
-              title="Open Neo memory folder"
-            >
-              <FolderOpen size={12} />
-              Open Memory
-            </button>
-            <button
-              className="chat-header-action"
-              onClick={() => setIsLogSidebarOpen(prev => !prev)}
-              title="Toggle logs"
-            >
-              Logs {isLogSidebarOpen ? '▼' : '▶'}
-            </button>
-            <button
-              className="chat-header-action"
-              onClick={handleOpenLogsWindow}
-              title="Open logs in a new window"
-            >
-              Open Logs Window
-            </button>
-          </div>
+              <button
+                className="chat-header-action"
+                onClick={handleOpenLogsWindow}
+                title="Open logs in a new window"
+              >
+                Open Logs Window
+              </button>
+            </div>
+          )}
 
           {messages.length === 0 ? (
-            <div className="chat-empty">
-              <div className="chat-empty-icon">✨</div>
-              <p className="chat-empty-title">What would you like to do?</p>
-              <p className="chat-empty-subtitle">I can read, write, and search files in your workspace.</p>
-              <button className="chat-empty-action" onClick={resync} disabled={isSyncing}>
-                <Brain size={14} className={isSyncing ? 'animate-pulse' : ''} />
-                {isSyncing ? 'Indexing workspace...' : 'Index workspace files'}
-              </button>
-              <p className="chat-empty-note">
-                {memoryStatus?.initialized
-                  ? `Indexed ${memoryStatus.fileCount} files • Last sync ${new Date(memoryStatus.lastSync).toLocaleDateString()}`
-                  : 'Build semantic memory so you can ask "where is auth handled?"'}
-              </p>
+            <div className="cowork-empty cowork-grid-bg">
+              <div className="cowork-empty-content">
+                <StarburstIcon size={36} className="cowork-starburst" />
+                <h2 className="cowork-empty-heading">Let's knock something off your list</h2>
+
+                {/* Info banner - intelligent file system */}
+                <div className="cowork-info-banner">
+                  <Brain size={15} />
+                  <span>
+                    {memoryStatus?.initialized
+                      ? `${memoryStatus.fileCount} files indexed. Neo understands your workspace.`
+                      : 'Neo indexes your files so the agent works better.'}
+                    {!memoryStatus?.initialized && !isSyncing && (
+                      <button className="cowork-info-link" onClick={resync}>Start scanning</button>
+                    )}
+                  </span>
+                </div>
+
+                {/* Task suggestion cards */}
+                <div className="cowork-tasks">
+                  <div className="cowork-tasks-header">
+                    <div className="cowork-tasks-header-left">
+                      <Sparkles size={13} />
+                      <span>Pick a task, any task</span>
+                    </div>
+                  </div>
+                  <div className="cowork-tasks-grid">
+                    <button
+                      className="cowork-task-card"
+                      onClick={() => setInput('What do you know about this workspace?')}
+                    >
+                      <Search size={16} />
+                      <span>Explore workspace</span>
+                    </button>
+                    <button
+                      className="cowork-task-card"
+                      onClick={() => setInput('Review my recent changes and suggest improvements')}
+                    >
+                      <ClipboardList size={16} />
+                      <span>Review my work</span>
+                    </button>
+                    <button
+                      className="cowork-task-card"
+                      onClick={() => setInput('Summarize what this project is about')}
+                    >
+                      <FileText size={16} />
+                      <span>Summarize project</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             <div className="chat-messages">
@@ -339,15 +376,6 @@ export function ChatView({
             workspaceDir={workspaceDir}
           />
         </div>
-
-        <FileSidebar
-          isOpen={isFileTreeOpen}
-          workspaceDir={workspaceDir}
-          files={fileTreeFiles}
-          selectedPath={selectedFilePath}
-          onSelectFile={setSelectedFilePath}
-          onClose={() => setIsFileTreeOpen(false)}
-        />
       </div>
 
       <DeleteThreadDialog
@@ -356,7 +384,7 @@ export function ChatView({
         onCancel={handleCancelDelete}
       />
 
-      {isSyncing && syncProgress && <SyncStatus progress={syncProgress} />}
+      {isSyncing && syncProgress && <SyncStatus progress={syncProgress} onStop={stopSync} />}
 
       <LogSidebar
         isOpen={isLogSidebarOpen}

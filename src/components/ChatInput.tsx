@@ -1,13 +1,13 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import {
-  ArrowUp,
+  ArrowRight,
   Square,
   ChevronDown,
   MessageSquare,
   Zap,
   FileText,
   Folder,
-  AtSign,
+  Plus,
 } from 'lucide-react';
 import { useFileSuggestions, type FileSuggestion } from '../hooks/useFileSuggestions';
 
@@ -92,7 +92,7 @@ export function ChatInput({
     clearSuggestions,
     selectNext,
     selectPrev,
-  } = useFileSuggestions({ workspaceDir, maxSuggestions: 8 });
+  } = useFileSuggestions({ workspaceDir: workspaceDir ?? null, maxSuggestions: 8 });
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -317,12 +317,9 @@ export function ChatInput({
   };
 
   const currentModel = MODEL_OPTIONS.find((m) => m.value === selectedModel) || MODEL_OPTIONS[0];
-  const ModelIcon = currentModel.icon;
 
   const getPlaceholderText = () => {
-    return selectedModel === 'thinking'
-      ? 'Ask me anything... Use @{file} to include files'
-      : 'Ask me anything... Use @{file} to include files';
+    return 'Type / for commands';
   };
 
   const getFileIcon = (suggestion: FileSuggestion) => {
@@ -412,6 +409,14 @@ export function ChatInput({
           {/* Bottom Controls */}
           <div className="chat-input-controls">
             <div className="chat-input-controls-left">
+              {/* Folder name display */}
+              {workspaceDir && (
+                <div className="cowork-folder-indicator">
+                  <Folder size={12} />
+                  <span>{workspaceDir.replace(/^\/Users\/[^/]+/, '~')}</span>
+                </div>
+              )}
+
               {/* @ Mention Button */}
               {workspaceDir && (
                 <button
@@ -419,18 +424,19 @@ export function ChatInput({
                   className="chat-at-btn"
                   title="Add file reference @{path}"
                 >
-                  <AtSign size={14} />
+                  <Plus size={14} />
                 </button>
               )}
+            </div>
 
+            <div className="chat-input-controls-right">
               {/* Model Dropdown */}
               <div ref={menuRef} className="relative model-menu">
                 <button
                   onClick={handleModelClick}
-                  className={`chat-model-btn ${currentModel.color === 'green' ? 'chat-model-btn-green' : 'chat-model-btn-amber'}`}
+                  className="cowork-model-btn"
                 >
-                  <ModelIcon size={12} />
-                  <span>{currentModel.label}</span>
+                  <span>{currentModel.label === 'Fast' ? 'Flash' : 'Thinking'}</span>
                   <ChevronDown size={12} className="opacity-60" />
                 </button>
 
@@ -463,9 +469,7 @@ export function ChatInput({
                   </div>
                 )}
               </div>
-            </div>
 
-            <div className="chat-input-controls-right">
               {isProcessing ? (
                 <button
                   onClick={onCancel}
@@ -477,9 +481,10 @@ export function ChatInput({
                 <button
                   onClick={handleSend}
                   disabled={!value.trim() || disabled}
-                  className={`chat-send-btn ${currentModel.color === 'green' ? 'chat-send-btn-green' : 'chat-send-btn-amber'}`}
+                  className="cowork-go-btn"
                 >
-                  <ArrowUp size={14} />
+                  <span>Let's go</span>
+                  <ArrowRight size={14} />
                 </button>
               )}
             </div>

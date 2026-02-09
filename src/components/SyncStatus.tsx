@@ -1,18 +1,19 @@
-import { Brain, FileSearch, Sparkles, Check } from 'lucide-react';
+import { Brain, FileSearch, Sparkles, Check, X } from 'lucide-react';
 import type { SyncProgress } from '../lib/memory';
 
 interface SyncStatusProps {
   progress: SyncProgress;
+  onStop?: () => void;
 }
 
-export function SyncStatus({ progress }: SyncStatusProps) {
+export function SyncStatus({ progress, onStop }: SyncStatusProps) {
   const getPhaseInfo = () => {
     switch (progress.phase) {
       case 'scanning':
         return {
           icon: FileSearch,
           label: 'Scanning workspace...',
-          sublabel: 'Finding indexable files',
+          sublabel: 'Discovering files',
           showSpinner: true,
         };
       case 'summarizing':
@@ -32,7 +33,7 @@ export function SyncStatus({ progress }: SyncStatusProps) {
       case 'complete':
         return {
           icon: Check,
-          label: `Indexed ${progress.current} files`,
+          label: `Synced ${progress.current} files`,
           sublabel: progress.total > progress.current ? `${progress.total - progress.current} unchanged` : undefined,
           showSpinner: false,
         };
@@ -57,6 +58,15 @@ export function SyncStatus({ progress }: SyncStatusProps) {
       </div>
       {progressPct !== null && (
         <span className="sync-status-pct">{progressPct}%</span>
+      )}
+      {onStop && progress.phase !== 'complete' && (
+        <button
+          className="sync-status-stop"
+          onClick={onStop}
+          title="Stop syncing"
+        >
+          <X size={12} />
+        </button>
       )}
     </div>
   );

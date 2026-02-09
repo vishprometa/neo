@@ -38,6 +38,22 @@ export type { ModelType };
 /** Message format for history (OpenAI/OpenRouter compatible) */
 export type ChatMessage = LLMMessage;
 
+const MAX_TOOL_RESULT_SIZE = 30_000; // 30KB cap per tool result in history
+const RETRYABLE_ERRORS = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'fetch failed', 'network'];
+const MAX_RETRIES = 2;
+
+/** Check if an error is transient and worth retrying */
+function isRetryableError(error: string): boolean {
+  const lower = error.toLowerCase();
+  return RETRYABLE_ERRORS.some(pattern => lower.includes(pattern.toLowerCase()));
+}
+
+/** Truncate a tool result string if it exceeds the size cap */
+function truncateToolResult(content: string, maxSize: number = MAX_TOOL_RESULT_SIZE): string {
+  if (content.length <= maxSize) return content;
+  return content.slice(0, maxSize) + '\n\n... (output truncated to save context)';
+}
+
 export class AgentRuntime {
   private client: LLMClient;
   private providerConfig: ProviderConfig;
@@ -305,7 +321,37 @@ export class AgentRuntime {
       }
     }
 
-    throw new Error('Max iterations reached');
+    // Gracefully handle max iterations - tell the model to wrap up
+    this.history.push({
+      role: 'user',
+      content: '[SYSTEM] You have reached the maximum number of tool call iterations (20). Please provide a final summary of what was accomplished and what remains to be done.',
+    });
+
+    // One final LLM call to generate a summary response (no tools)
+    try {
+      let finalText = '';
+      let finalBlockId: string | null = null;
+      await this.client.streamChat(
+        systemPrompt,
+        this.history,
+        [], // no tools - force a text response
+        (delta: LLMStreamDelta) => {
+          if (delta.content) {
+            finalText += delta.content;
+            if (!finalBlockId) {
+              finalBlockId = `text_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+            }
+            this.emitBlock(createTextBlock(finalBlockId, finalText));
+          }
+        },
+        signal
+      );
+      if (finalText.trim()) {
+        this.history.push({ role: 'assistant', content: finalText });
+      }
+    } catch {
+      // If even the summary fails, just stop
+    }
   }
 
   /**
@@ -356,66 +402,80 @@ export class AgentRuntime {
     };
 
     const startTime = Date.now();
+    let lastError = '';
 
-    try {
-      const toolResult = await tool.execute(fc.args, ctx);
-      const executionTime = Date.now() - startTime;
+    // Retry loop for transient errors
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const toolResult = await tool.execute(fc.args, ctx);
+        const executionTime = Date.now() - startTime;
 
-      this.emitBlock(createToolCallBlock(toolCallBlockId, fc.name, fc.args, 'completed'));
-      this.emitBlock(createToolResultBlock(
-        toolResultBlockId,
-        toolResult.output,
-        fc.name,
-        'completed',
-        executionTime
-      ));
+        this.emitBlock(createToolCallBlock(toolCallBlockId, fc.name, fc.args, 'completed'));
+        this.emitBlock(createToolResultBlock(
+          toolResultBlockId,
+          toolResult.output,
+          fc.name,
+          'completed',
+          executionTime
+        ));
 
-      // If the tool returned attachments (images, PDFs), include them as
-      // multipart content so the LLM can see the binary data.
-      if (toolResult.attachments && toolResult.attachments.length > 0) {
-        const parts: Array<{ type: string; text?: string; [key: string]: unknown }> = [
-          { type: 'text', text: JSON.stringify({ result: toolResult.output }) },
-        ];
-        for (const att of toolResult.attachments) {
-          parts.push({
-            type: 'inline_data',
-            mime: att.mime,
-            name: att.name,
-            data: att.data,
-          });
+        // If the tool returned attachments (images, PDFs), include them as
+        // multipart content so the LLM can see the binary data.
+        if (toolResult.attachments && toolResult.attachments.length > 0) {
+          const parts: Array<{ type: string; text?: string; [key: string]: unknown }> = [
+            { type: 'text', text: truncateToolResult(JSON.stringify({ result: toolResult.output })) },
+          ];
+          for (const att of toolResult.attachments) {
+            parts.push({
+              type: 'inline_data',
+              mime: att.mime,
+              name: att.name,
+              data: att.data,
+            });
+          }
+          return {
+            role: 'tool',
+            tool_call_id: fc.id,
+            content: parts,
+          };
         }
+
         return {
           role: 'tool',
           tool_call_id: fc.id,
-          content: parts,
+          content: truncateToolResult(JSON.stringify({ result: toolResult.output })),
         };
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+
+        // Only retry transient errors, and not on the last attempt
+        if (attempt < MAX_RETRIES && isRetryableError(lastError)) {
+          const delay = Math.pow(2, attempt) * 500; // 500ms, 1000ms
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        break;
       }
-
-      return {
-        role: 'tool',
-        tool_call_id: fc.id,
-        content: JSON.stringify({ result: toolResult.output }),
-      };
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      const executionTime = Date.now() - startTime;
-
-      this.emitBlock(createToolCallBlock(toolCallBlockId, fc.name, fc.args, 'error'));
-      this.emitBlock(createToolResultBlock(
-        toolResultBlockId,
-        '',
-        fc.name,
-        'error',
-        executionTime,
-        error
-      ));
-
-      return {
-        role: 'tool',
-        tool_call_id: fc.id,
-        content: JSON.stringify({ error }),
-      };
     }
+
+    // All attempts failed
+    const executionTime = Date.now() - startTime;
+    this.emitBlock(createToolCallBlock(toolCallBlockId, fc.name, fc.args, 'error'));
+    this.emitBlock(createToolResultBlock(
+      toolResultBlockId,
+      '',
+      fc.name,
+      'error',
+      executionTime,
+      lastError
+    ));
+
+    return {
+      role: 'tool',
+      tool_call_id: fc.id,
+      content: JSON.stringify({ error: lastError }),
+    };
   }
 
   clearHistory() {
