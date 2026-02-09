@@ -21,9 +21,19 @@
 
 Neo is an **AI coworker** — a desktop app that remembers your projects, files, and conversations. Unlike chatbots that start fresh every time, Neo builds **persistent memory** that grows the more you use it.
 
-Not just for programmers — Neo helps writers, researchers, designers, students, anyone who works with files on their computer.
+Not just for programmers — Neo helps writers, researchers, designers, students, anyone who works with files on their computer. Powered by **Gemini 3**, it can reason through complex tasks, work with long documents, and use tools together to get real work done.
 
-**Writing** / **Research** / **File management** / **Data work** / **Code** / **Planning** / **Web search** / **Automation**
+### Use cases
+
+- **Writing** — "Proofread my essay and fix the grammar" / "Draft a follow-up email based on my notes"
+- **Research** — "Search the web for recent studies on X and summarize them into a doc"
+- **File organization** — "Go through my downloads folder and organize files by type"
+- **Data** — "Read this CSV and pull out all rows where revenue dropped"
+- **Code** — "Add dark mode to the settings page" / "Find and fix the bug in auth.ts"
+- **Planning** — "Break this project into tasks and track my progress"
+- **Automation** — "Every file in /reports — rename them with today's date and move to /archive"
+
+Gemini 3 Flash handles everyday tasks fast and cheap. Switch to Gemini 3 Pro (or any model via OpenRouter) when you need deeper reasoning.
 
 ### Memory
 
@@ -46,6 +56,8 @@ Download the `.dmg` from [Releases](https://github.com/vishprometa/neo/releases)
 ```bash
 xattr -cr /Applications/Neo.app
 ```
+
+> **Why?** macOS blocks apps that aren't signed with an Apple Developer certificate. This command removes the quarantine flag so macOS treats Neo as trusted. You only need to do this once.
 
 <details>
 <summary>Build from source</summary>
