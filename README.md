@@ -33,7 +33,7 @@ Not just for programmers — Neo helps writers, researchers, designers, students
 - **Planning** — "Break this project into tasks and track my progress"
 - **Automation** — "Every file in /reports — rename them with today's date and move to /archive"
 
-Gemini 3 Flash handles everyday tasks fast and cheap. Switch to Gemini 3 Pro (or any model via OpenRouter) when you need deeper reasoning.
+Gemini 3 Flash handles everyday tasks fast and cheap. Switch to Gemini 3 Pro when you need deeper reasoning.
 
 ### Memory
 
@@ -75,14 +75,14 @@ npm run tauri build     # release .dmg
 
 ## Setup
 
-1. Get an API key from [Google AI Studio](https://aistudio.google.com/apikey) (free) or [OpenRouter](https://openrouter.ai/keys)
+1. Get an API key from [Google AI Studio](https://aistudio.google.com/apikey) (free tier available)
 2. Open Neo → **Settings** → paste your key
 3. Choose a workspace folder — Neo indexes it and starts building memory
 
 ## Features
 
 - **Persistent memory** — `.neomemory/` with AI summaries, project index, daily journal
-- **Powered by Gemini 3** — Flash and Pro (direct) or any model via OpenRouter
+- **Powered by Gemini 3** — Flash for speed, Pro for deep reasoning
 - **File tools** — read, write, edit, search, organize
 - **Web access** — search and fetch pages
 - **Shell** — run commands with safety checks
@@ -102,7 +102,7 @@ Neo: "Done! Created summary.md with the key themes."
 
 ## Tech Stack
 
-[Tauri v2](https://v2.tauri.app/) · React 19 · TypeScript · TailwindCSS · Gemini 3 · OpenRouter · Vite 7
+[Tauri v2](https://v2.tauri.app/) · React 19 · TypeScript · TailwindCSS · [Gemini 3](https://ai.google.dev/) · Vite 7
 
 ## License
 
