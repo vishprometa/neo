@@ -95,13 +95,11 @@ export function useChat({ providerConfig, workspaceDir, messages, setMessages, o
 
     // Process @ mentions if workspace is available
     let processedMessage = rawInput;
-    let injectedFiles: string[] = [];
-    
+
     if (workspaceDir && extractAtMentions(rawInput).length > 0) {
       try {
         const result = await processAtMentions(rawInput, workspaceDir);
         processedMessage = result.text;
-        injectedFiles = result.injectedFiles;
         
         // Log any errors but don't fail
         if (result.errors.length > 0) {

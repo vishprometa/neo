@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { readDir, exists, stat } from '@tauri-apps/plugin-fs';
-import { join, basename, dirname } from '@tauri-apps/api/path';
+import { join } from '@tauri-apps/api/path';
 
 export interface FileSuggestion {
   /** Display name */

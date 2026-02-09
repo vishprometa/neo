@@ -79,6 +79,7 @@ interface StreamAccumulator {
 type OpenRouterPdfEngine = 'pdf-text' | 'mistral-ocr' | 'native' | '';
 
 interface OpenRouterFilePart {
+  [key: string]: unknown;
   type: 'file';
   file: {
     filename: string;
@@ -88,6 +89,7 @@ interface OpenRouterFilePart {
 }
 
 interface OpenRouterImagePart {
+  [key: string]: unknown;
   type: 'image_url';
   image_url: {
     url: string;
@@ -413,15 +415,15 @@ export class OpenRouterClient implements LLMClient {
     const requestBody = {
       model: this.model,
       messages: [
-        { role: 'system', content: systemInstruction },
-        { role: 'user', content: prompt },
+        { role: 'system' as const, content: systemInstruction },
+        { role: 'user' as const, content: prompt },
       ],
       stream: false,
       max_tokens: maxTokens,
       temperature: 0.2,
     };
     const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    await this.logRequest(requestId, requestBody, requestBody.messages);
+    await this.logRequest(requestId, requestBody, requestBody.messages as LLMMessage[]);
 
     const response = await fetch(OPENROUTER_API_URL, {
       method: 'POST',

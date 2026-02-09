@@ -110,7 +110,7 @@ export function FileSidebar({
   workspaceDir,
   files = [],
   onSelectFile,
-  onClose,
+  onClose: _onClose,
   selectedPath,
 }: FileSidebarProps) {
   const DEFAULT_WIDTH = 220;

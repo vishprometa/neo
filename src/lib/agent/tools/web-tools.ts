@@ -83,7 +83,7 @@ Use this to:
     timeout: z.coerce.number().optional().describe('Timeout in milliseconds (default: 15000)'),
     raw: z.coerce.boolean().optional().describe('Return raw content without HTML processing'),
   }),
-  async execute(params, ctx) {
+  async execute(params, _ctx) {
     const { url, timeout = DEFAULT_TIMEOUT_MS, raw = false } = params;
 
     // Validate URL
@@ -182,7 +182,7 @@ For full web search, integrate with a search API.`,
     query: z.string().describe('The search query'),
     site: z.string().optional().describe('Limit search to a specific site (e.g., "docs.python.org")'),
   }),
-  async execute(params, ctx) {
+  async execute(params, _ctx) {
     const { query, site } = params;
 
     // Build search URL - using DuckDuckGo HTML interface

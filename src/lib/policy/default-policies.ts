@@ -2,7 +2,7 @@
  * Default policy rules for Neo
  */
 
-import { PolicyDecision, type PolicyRule, ApprovalMode } from './policy-engine';
+import { PolicyDecision, type PolicyRule } from './policy-engine';
 
 /**
  * Default policies that balance safety with usability

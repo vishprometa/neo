@@ -6,7 +6,7 @@
  * 3. JIT Memory (Tier 3): On-demand loading when paths are accessed
  */
 
-import { readTextFile, exists, readDir } from '@tauri-apps/plugin-fs';
+import { readTextFile, exists } from '@tauri-apps/plugin-fs';
 import { join, dirname, homeDir } from '@tauri-apps/api/path';
 
 export interface MemoryTier {

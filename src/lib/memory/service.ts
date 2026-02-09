@@ -207,7 +207,7 @@ function shouldIgnoreFile(name: string, relativePath: string, extension: string,
   return rules.fileNames.has(name) ||
     rules.names.has(name) ||
     rules.paths.has(relativePath) ||
-    (extension && rules.extensions.has(extension.toLowerCase()));
+    (!!extension && rules.extensions.has(extension.toLowerCase()));
 }
 
 /**

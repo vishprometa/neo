@@ -111,7 +111,7 @@ function createToolFromDiscovered(discovered: DiscoveredTool): ToolDefinition | 
     return defineTool(discovered.name, {
       description: `${discovered.description}\n\n[Custom tool from: ${discovered.source}]`,
       parameters,
-      async execute(params, ctx) {
+      async execute(params, _ctx) {
         // Execute the command with parameters
         // This is a placeholder - actual implementation would use shell execution
         let command = discovered.command;

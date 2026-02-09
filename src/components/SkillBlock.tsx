@@ -1,8 +1,6 @@
 import { useState } from 'react';
 import {
   Loader2,
-  CheckCircle2,
-  XCircle,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -40,19 +38,6 @@ export function SkillBlock({
   const [copied, setCopied] = useState(false);
 
   const displayContent = error || result || '';
-
-  const getStatusIcon = () => {
-    switch (status) {
-      case ToolStatus.EXECUTING:
-        return <Loader2 className="h-4 w-4 animate-spin opacity-60" />;
-      case ToolStatus.COMPLETED:
-        return <CheckCircle2 className="h-4 w-4 text-emerald-500/80" />;
-      case ToolStatus.ERROR:
-        return <XCircle className="h-4 w-4 text-red-400/80" />;
-      default:
-        return null;
-    }
-  };
 
   const getStatusText = () => {
     switch (status) {
