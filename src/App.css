@@ -570,10 +570,24 @@ body {
   opacity: 0.8;
 }
 
+/* Chat body: flex row with messages + optional task sidebar */
+.chat-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  scrollbar-width: none;
   padding: 16px;
+  min-width: 0;
+}
+
+.chat-messages::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-messages-inner {
@@ -588,7 +602,7 @@ body {
 
 .message-user {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .message-user-content {
@@ -596,7 +610,7 @@ body {
   padding: 10px 14px;
   background: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
-  border-radius: calc(var(--radius) + 6px) calc(var(--radius) + 6px) calc(var(--radius) - 6px) calc(var(--radius) + 6px);
+  border-radius: calc(var(--radius) + 6px) calc(var(--radius) + 6px) calc(var(--radius) + 6px) calc(var(--radius) - 6px);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -605,6 +619,94 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Task sidebar: compact task list beside chat */
+.task-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 12px;
+  border-left: 1px solid hsl(var(--border));
+}
+
+.task-sidebar::-webkit-scrollbar {
+  display: none;
+}
+
+.task-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.task-sidebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(var(--muted-foreground));
+}
+
+.task-sidebar-count {
+  font-size: 11px;
+  color: hsl(var(--muted-foreground));
+}
+
+.task-sidebar-progress {
+  height: 2px;
+  background: hsl(var(--foreground) / 0.06);
+  border-radius: 1px;
+  margin-bottom: 8px;
+}
+
+.task-sidebar-progress-fill {
+  height: 100%;
+  background: hsl(142 71% 45% / 0.6);
+  border-radius: 1px;
+  transition: width 0.3s ease;
+}
+
+.task-sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.task-sidebar-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.task-sidebar-item-text {
+  font-size: 12px;
+  line-height: 1.4;
+  color: hsl(var(--foreground) / 0.8);
+}
+
+.task-sidebar-item.task-done .task-sidebar-item-text {
+  text-decoration: line-through;
+  color: hsl(var(--muted-foreground));
+  opacity: 0.6;
+}
+
+.task-sidebar-item.task-cancelled .task-sidebar-item-text {
+  text-decoration: line-through;
+  opacity: 0.4;
+}
+
+.task-sidebar-item.task-active .task-sidebar-item-text {
+  color: hsl(var(--foreground));
+}
+
+@media (max-width: 700px) {
+  .task-sidebar {
+    display: none;
+  }
 }
 
 .message-assistant-content {

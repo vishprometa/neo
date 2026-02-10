@@ -24,14 +24,15 @@ function coerceStringBooleans<T>(obj: T): T {
  * Models sometimes send { filePath: undefined } which Zod rejects.
  */
 function stripNullish(obj: unknown): unknown {
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return obj;
+  if (typeof obj !== 'object' || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(stripNullish);
 
   const input = obj as Record<string, unknown>;
   const result: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(input)) {
     if (value !== undefined && value !== null) {
-      result[key] = value;
+      result[key] = stripNullish(value);
     }
   }
 
@@ -44,7 +45,8 @@ function stripNullish(obj: unknown): unknown {
  * This adds aliases so both forms work.
  */
 function normalizeParamNames(obj: unknown): unknown {
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return obj;
+  if (typeof obj !== 'object' || obj === null) return obj;
+  if (Array.isArray(obj)) return obj.map(normalizeParamNames);
 
   const input = obj as Record<string, unknown>;
   const result: Record<string, unknown> = {};
@@ -53,21 +55,24 @@ function normalizeParamNames(obj: unknown): unknown {
     // Skip undefined/null values
     if (value === undefined || value === null) continue;
 
+    // Recursively normalize nested values
+    const normalizedValue = normalizeParamNames(value);
+
     // Keep original key
-    result[key] = value;
+    result[key] = normalizedValue;
 
     // Add camelCase version if the key contains underscores (snake_case → camelCase)
     if (key.includes('_')) {
       const camelCase = key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
       if (result[camelCase] === undefined) {
-        result[camelCase] = value;
+        result[camelCase] = normalizedValue;
       }
     }
 
     // Add snake_case version if the key is camelCase (camelCase → snake_case)
     const snakeCase = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
     if (snakeCase !== key && result[snakeCase] === undefined) {
-      result[snakeCase] = value;
+      result[snakeCase] = normalizedValue;
     }
   }
 

@@ -130,13 +130,14 @@ export function createToolResultBlock(
   toolName: string,
   status: 'completed' | 'error',
   executionTime?: number,
-  error?: string
+  error?: string,
+  toolMetadata?: Record<string, unknown>
 ): ContentBlock {
   return {
     id,
     format: 'tool_result',
     content: { output, executionTime, error },
-    metadata: { tool: toolName, status, execution_time: executionTime },
+    metadata: { tool: toolName, status, execution_time: executionTime, ...toolMetadata },
   };
 }
 

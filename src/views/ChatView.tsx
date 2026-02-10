@@ -1,12 +1,12 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Brain, X, FolderOpen, StopCircle, ClipboardList, FileText, Sparkles, Search } from 'lucide-react';
+import { Brain, X, StopCircle, ClipboardList, FileText, Sparkles, Search } from 'lucide-react';
 import { Titlebar } from '../components/Titlebar';
 import { ChatInput } from '../components/ChatInput';
 import { MessageBlock } from '../components/MessageBlock';
+import { TaskSidebar } from '../components/TaskSidebar';
 import { ThreadSidebar } from '../components/ThreadSidebar';
 import { DeleteThreadDialog } from '../components/DeleteThreadDialog';
 import { SyncStatus } from '../components/SyncStatus';
-import { LogSidebar } from '../components/LogSidebar';
 import { StarburstIcon } from '../components/StarburstIcon';
 import type { LogEntry } from '../hooks/useMemorySync';
 import { useThreads, useChat } from '../hooks';
@@ -14,7 +14,6 @@ import { useEditorDetection } from '../hooks/useEditorDetection';
 import type { SyncProgress } from '../lib/memory';
 import type { ProviderConfig } from '../lib/llm';
 import { getModelDisplayName } from '../lib/llm';
-import { open } from '@tauri-apps/plugin-shell';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 type SidebarTab = 'threads' | 'memory';
@@ -44,7 +43,7 @@ export function ChatView({
   onNewWindow: _onNewWindow,
   error,
   setError,
-  logs,
+  logs: _logs,
   onLog,
   syncProgress,
   isSyncing,
@@ -55,7 +54,6 @@ export function ChatView({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('threads');
   const [pendingDeleteThreadId, setPendingDeleteThreadId] = useState<string | null>(null);
-  const [isLogSidebarOpen, setIsLogSidebarOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -80,21 +78,15 @@ export function ChatView({
   // Editor detection
   const { editors, openInEditor, openInFinder, openInTerminal, finderIcon, terminalIcon } = useEditorDetection();
 
-  // Handler for opening Neo memory folder
-  const handleOpenNeoMemory = useCallback(async () => {
-    try {
-      const memoryPath = `${workspaceDir}/.neomemory`;
-      await open(memoryPath);
-      onLog({
-        id: `${Date.now()}-${Math.random()}`,
-        timestamp: Date.now(),
-        level: 'info',
-        message: `Opened Neo memory folder: ${memoryPath}`,
-      });
-    } catch (err) {
-      setError(`Failed to open Neo memory folder: ${(err as Error).message}`);
+  // Toggle sidebar on the Memory tab
+  const handleOpenMemory = useCallback(() => {
+    if (isSidebarOpen && sidebarTab === 'memory') {
+      setIsSidebarOpen(false);
+    } else {
+      setSidebarTab('memory');
+      setIsSidebarOpen(true);
     }
-  }, [workspaceDir, onLog, setError]);
+  }, [isSidebarOpen, sidebarTab]);
 
   const handleOpenLogsWindow = useCallback(() => {
     const label = `neo-logs-${Date.now()}`;
@@ -244,25 +236,18 @@ export function ChatView({
               )}
               <button
                 className="chat-header-action"
-                onClick={handleOpenNeoMemory}
-                title="Open Neo memory folder"
+                onClick={handleOpenMemory}
+                title="Open memory browser"
               >
-                <FolderOpen size={12} />
-                Open Memory
-              </button>
-              <button
-                className="chat-header-action"
-                onClick={() => setIsLogSidebarOpen(prev => !prev)}
-                title="Toggle logs"
-              >
-                Logs {isLogSidebarOpen ? '▼' : '▶'}
+                <Brain size={12} />
+                Memory
               </button>
               <button
                 className="chat-header-action"
                 onClick={handleOpenLogsWindow}
                 title="Open logs in a new window"
               >
-                Open Logs Window
+                Logs
               </button>
             </div>
           )}
@@ -321,37 +306,40 @@ export function ChatView({
               </div>
             </div>
           ) : (
-            <div className="chat-messages">
-              <div className="chat-messages-inner">
-                {messages.map((message) => (
-                  <div key={message.id} className="message">
-                    {message.role === 'user' ? (
-                      <div className="message-user">
-                        <div className="message-user-content">{message.text}</div>
-                      </div>
-                    ) : (
-                      <div className="message-assistant">
-                        {message.blocks && message.blocks.map((block) => (
-                          <MessageBlock key={block.id} block={block} />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {isProcessing && messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
-                  <div className="thinking">
-                    <div className="thinking-dots">
-                      <span className="thinking-dot" />
-                      <span className="thinking-dot" />
-                      <span className="thinking-dot" />
+            <div className="chat-body">
+              <div className="chat-messages">
+                <div className="chat-messages-inner">
+                  {messages.map((message) => (
+                    <div key={message.id} className="message">
+                      {message.role === 'user' ? (
+                        <div className="message-user">
+                          <div className="message-user-content">{message.text}</div>
+                        </div>
+                      ) : (
+                        <div className="message-assistant">
+                          {message.blocks && message.blocks.map((block) => (
+                            <MessageBlock key={block.id} block={block} />
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <span>Thinking</span>
-                  </div>
-                )}
+                  ))}
 
-                <div ref={messagesEndRef} />
+                  {isProcessing && messages.length > 0 && messages[messages.length - 1]?.role === 'user' && (
+                    <div className="thinking">
+                      <div className="thinking-dots">
+                        <span className="thinking-dot" />
+                        <span className="thinking-dot" />
+                        <span className="thinking-dot" />
+                      </div>
+                      <span>Thinking</span>
+                    </div>
+                  )}
+
+                  <div ref={messagesEndRef} />
+                </div>
               </div>
+              <TaskSidebar messages={messages} />
             </div>
           )}
 
@@ -385,12 +373,6 @@ export function ChatView({
       />
 
       {isSyncing && syncProgress && <SyncStatus progress={syncProgress} onStop={stopSync} />}
-
-      <LogSidebar
-        isOpen={isLogSidebarOpen}
-        logs={logs}
-        onClose={() => setIsLogSidebarOpen(false)}
-      />
     </>
   );
 }

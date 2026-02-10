@@ -10,6 +10,7 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { invoke } from '@tauri-apps/api/core';
 import type { LLMProvider, ProviderConfig } from './lib/llm';
 import type { LogEntry } from './hooks/useMemorySync';
+import { safeSetJSON } from './lib/storage';
 import './App.css';
 
 const STORAGE_KEY_API_KEY = 'neo_api_key';
@@ -85,7 +86,7 @@ function App() {
   const handleLog = useCallback((entry: LogEntry) => {
     setLogs((prev) => {
       const updated = [...prev, entry].slice(-500);
-      localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(updated));
+      safeSetJSON(LOG_STORAGE_KEY, updated);
       return updated;
     });
   }, []);

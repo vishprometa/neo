@@ -64,20 +64,17 @@ function formatTodoList(todos: Todo[]): string {
 }
 
 export const TodoWriteTool = defineTool('todowrite', {
-  description: `Create and manage a structured task list for the current session.
+  description: `Create and manage a structured task list. The task list is displayed to the user in a sidebar panel that updates in real-time.
 
-Use this tool to:
-- Track progress on complex multi-step tasks
-- Break down features into actionable items
-- Mark tasks as completed, in_progress, pending, or cancelled
+IMPORTANT WORKFLOW:
+1. At the START of a multi-step task, call todowrite with ALL planned tasks (status: pending).
+2. Before starting each task, call todowrite to set that task to in_progress.
+3. Immediately after completing each task, call todowrite to mark it completed.
+4. KEEP WORKING through every task until ALL are completed — do NOT stop mid-list or ask the user which to do next unless genuinely ambiguous.
+5. Only have ONE task as in_progress at a time.
 
-Task states: pending, in_progress, completed, cancelled
-
-Guidelines:
-- Use for complex tasks with 3+ steps
-- Keep only ONE task in_progress at a time
-- Mark tasks complete immediately after finishing
-- Create specific, actionable items`,
+Task states: pending, in_progress, completed, cancelled.
+Create specific, actionable items. The user sees this list live — keep it updated as you work.`,
   parameters: z.object({
     todos: z.array(TodoItem).describe('The updated todo list'),
   }),
@@ -94,6 +91,7 @@ Guidelines:
         total: params.todos.length,
         active: active.length,
         completed: completed.length,
+        todos: params.todos,
       },
     };
   },
@@ -115,6 +113,7 @@ export const TodoReadTool = defineTool('todoread', {
         total: todos.length,
         active: active.length,
         completed: completed.length,
+        todos,
       },
     };
   },

@@ -3,7 +3,7 @@
  * Block-based streaming architecture using unified LLM interface
  * Supports both Gemini (direct) and OpenRouter providers
  */
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { z } from 'zod';
 import {
   createClient,
   type LLMClient,
@@ -138,10 +138,9 @@ export class AgentRuntime {
   private getToolDefinitions(): LLMTool[] {
     const tools = registry.all();
     return tools.map((tool) => {
-      const jsonSchema = zodToJsonSchema(tool.parameters as any, { name: tool.id });
-      // Extract the actual schema from zod-to-json-schema output
-      const schema = (jsonSchema as any).definitions?.[tool.id] || jsonSchema;
-      
+      // Use Zod v4's built-in JSON Schema conversion (zod-to-json-schema doesn't support v4)
+      const schema = z.toJSONSchema(tool.parameters);
+
       return {
         type: 'function' as const,
         function: {
@@ -149,8 +148,8 @@ export class AgentRuntime {
           description: tool.description,
           parameters: {
             type: 'object',
-            properties: schema.properties || {},
-            required: schema.required || [],
+            properties: (schema as any).properties || {},
+            required: (schema as any).required || [],
           },
         },
       };
@@ -186,7 +185,7 @@ export class AgentRuntime {
     
     const systemPrompt = buildSystemPrompt(this.workspaceDir, this.memoryContext, contextInstructions);
     const tools = this.getToolDefinitions();
-    const maxIterations = 20; // Prevent infinite loops
+    const maxIterations = 40; // Allow enough iterations for multi-step task lists
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       if (signal?.aborted) {
@@ -324,7 +323,7 @@ export class AgentRuntime {
     // Gracefully handle max iterations - tell the model to wrap up
     this.history.push({
       role: 'user',
-      content: '[SYSTEM] You have reached the maximum number of tool call iterations (20). Please provide a final summary of what was accomplished and what remains to be done.',
+      content: '[SYSTEM] You have reached the maximum number of tool call iterations (40). Please provide a final summary of what was accomplished and what remains to be done. Update the todo list with final statuses.',
     });
 
     // One final LLM call to generate a summary response (no tools)
@@ -416,7 +415,9 @@ export class AgentRuntime {
           toolResult.output,
           fc.name,
           'completed',
-          executionTime
+          executionTime,
+          undefined,
+          toolResult.metadata
         ));
 
         // If the tool returned attachments (images, PDFs), include them as

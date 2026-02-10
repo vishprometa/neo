@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import type { Message } from '../lib/agent';
+import { safeSetJSON } from '../lib/storage';
 
 export interface Thread {
   id: string;
@@ -61,7 +62,7 @@ export function useThreads(workspaceDir: string | null) {
         if (thread.id !== activeThreadId) return thread;
         return { ...thread, messages, updatedAt: Date.now() };
       });
-      localStorage.setItem(storageKey, JSON.stringify(updated));
+      safeSetJSON(storageKey, updated);
       return updated;
     });
   }, [messages, activeThreadId, storageKey]);
@@ -77,7 +78,7 @@ export function useThreads(workspaceDir: string | null) {
         if (thread.title !== 'New Chat') return thread;
         return { ...thread, title: (firstUser.text || '').slice(0, 40) };
       });
-      localStorage.setItem(storageKey, JSON.stringify(updated));
+      safeSetJSON(storageKey, updated);
       return updated;
     });
   }, [messages, activeThreadId, storageKey]);
@@ -99,7 +100,7 @@ export function useThreads(workspaceDir: string | null) {
     };
     setThreads((prev) => {
       const updated = [newThread, ...prev];
-      if (storageKey) localStorage.setItem(storageKey, JSON.stringify(updated));
+      if (storageKey) safeSetJSON(storageKey, updated);
       return updated;
     });
     setActiveThreadId(newThread.id);
@@ -110,7 +111,7 @@ export function useThreads(workspaceDir: string | null) {
   const deleteThread = useCallback((threadId: string) => {
     setThreads((prev) => {
       const updated = prev.filter((t) => t.id !== threadId);
-      if (storageKey) localStorage.setItem(storageKey, JSON.stringify(updated));
+      if (storageKey) safeSetJSON(storageKey, updated);
       return updated;
     });
     if (activeThreadId === threadId) {
@@ -156,7 +157,7 @@ export function useThreads(workspaceDir: string | null) {
         if (thread.id !== editingThreadId) return thread;
         return { ...thread, title: newTitle, updatedAt: Date.now() };
       });
-      localStorage.setItem(storageKey, JSON.stringify(updated));
+      safeSetJSON(storageKey, updated);
       return updated;
     });
     setEditingThreadId(null);

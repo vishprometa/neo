@@ -1,4 +1,4 @@
-import { Plus, Trash2, PencilLine, MessageSquare, Brain } from 'lucide-react';
+import { SquarePen, Trash2, PencilLine, MessageSquare, Brain } from 'lucide-react';
 import { MemoryBrowser } from './MemoryBrowser';
 import type { Thread } from '../hooks';
 
@@ -83,8 +83,8 @@ export function ThreadSidebar({
           <div className="thread-sidebar-header">
             <span className="thread-sidebar-title">Threads</span>
             <div className="thread-sidebar-actions">
-              <button className="titlebar-btn" onClick={onNewThread} title="New thread">
-                <Plus size={14} />
+              <button className="titlebar-btn" onClick={onNewThread} title="New chat">
+                <SquarePen size={14} />
               </button>
             </div>
           </div>

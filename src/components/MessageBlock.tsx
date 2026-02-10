@@ -64,7 +64,7 @@ function ReasoningBlock({ content }: { content: string }) {
 // Tool call block - uses SkillBlock for display
 function ToolCallBlock({ block }: { block: ContentBlock }) {
   const content = block.content as ToolCallBlockContent;
-  
+
   // Map internal status to SkillBlock status
   const getStatus = (): ToolStatus => {
     switch (content.status) {
@@ -78,12 +78,17 @@ function ToolCallBlock({ block }: { block: ContentBlock }) {
         return ToolStatus.EXECUTING; // pending shows as executing
     }
   };
-  
+
   // Only show tool_call blocks that are executing (not completed/error - those have tool_result)
   if (content.status === 'completed' || content.status === 'error') {
     return null;
   }
-  
+
+  // Todo tools: hidden inline — rendered in the fixed TaskSidebar instead
+  if (content.name === 'todowrite' || content.name === 'todoread') {
+    return null;
+  }
+
   return (
     <SkillBlock
       id={block.id}
@@ -101,7 +106,12 @@ function ToolResultBlock({ block }: { block: ContentBlock }) {
   const toolName = (metadata.tool as string) || 'Tool';
   const status = (metadata.status as string) === 'error' ? ToolStatus.ERROR : ToolStatus.COMPLETED;
   const executionTime = metadata.execution_time as number | undefined;
-  
+
+  // Todo tools: hidden inline — rendered in the fixed TaskSidebar instead
+  if ((toolName === 'todowrite' || toolName === 'todoread') && metadata.todos) {
+    return null;
+  }
+
   return (
     <SkillBlock
       id={block.id}

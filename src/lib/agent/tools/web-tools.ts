@@ -4,6 +4,7 @@
  */
 import { z } from 'zod';
 import { defineTool } from '../tool';
+import { GoogleGenAI } from '@google/genai';
 
 const MAX_RESPONSE_SIZE = 100000; // 100KB
 const DEFAULT_TIMEOUT_MS = 15000;
@@ -168,70 +169,299 @@ Use this to:
   },
 });
 
+type SearchResult = { title: string; url: string; snippet: string };
+
+const GEMINI_SEARCH_MODEL = 'gemini-2.0-flash-lite';
+
+async function searchViaGemini(
+  apiKey: string,
+  query: string,
+): Promise<SearchResult[]> {
+  const client = new GoogleGenAI({ apiKey });
+
+  const response = await client.models.generateContent({
+    model: GEMINI_SEARCH_MODEL,
+    contents: [{ role: 'user', parts: [{ text: query }] }],
+    config: {
+      tools: [{ googleSearch: {} }],
+    },
+  });
+
+  const candidate = response.candidates?.[0];
+  if (!candidate) throw new Error('No response from Gemini');
+
+  const results: SearchResult[] = [];
+  const chunks = candidate.groundingMetadata?.groundingChunks || [];
+
+  for (const chunk of chunks) {
+    if (chunk.web) {
+      results.push({
+        title: chunk.web.title || chunk.web.domain || '',
+        url: chunk.web.uri || '',
+        snippet: '',
+      });
+    }
+  }
+
+  // Enrich snippets from groundingSupports if available
+  const supports = candidate.groundingMetadata?.groundingSupports || [];
+  for (const support of supports) {
+    const text = support.segment?.text || '';
+    if (!text) continue;
+    for (const idx of support.groundingChunkIndices || []) {
+      if (idx < results.length && !results[idx].snippet) {
+        results[idx].snippet = text;
+      }
+    }
+  }
+
+  // If no grounding chunks but we got text, return as single result
+  if (results.length === 0 && candidate.content?.parts) {
+    const text = candidate.content.parts.map((p) => p.text || '').join('');
+    if (text) {
+      return [{ title: 'Web Search Results', url: '', snippet: text }];
+    }
+  }
+
+  return results.slice(0, 10);
+}
+
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const SEARCH_MODEL = 'google/gemini-2.5-flash-lite:online';
+
+interface OpenRouterAnnotation {
+  type: 'url_citation';
+  url_citation: {
+    url: string;
+    title?: string;
+    content?: string;
+    start_index?: number;
+    end_index?: number;
+  };
+}
+
+interface OpenRouterSearchResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+      annotations?: OpenRouterAnnotation[];
+    };
+  }>;
+}
+
+async function searchViaOpenRouter(
+  apiKey: string,
+  query: string,
+): Promise<SearchResult[]> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const response = await fetch(OPENROUTER_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://neo.local',
+        'X-Title': 'Neo Coding Assistant',
+      },
+      body: JSON.stringify({
+        model: SEARCH_MODEL,
+        messages: [
+          {
+            role: 'user',
+            content: `Search the web for: ${query}\n\nReturn a concise summary of the top results with source URLs.`,
+          },
+        ],
+        plugins: [{ id: 'web', max_results: 10 }],
+        max_tokens: 4096,
+        temperature: 0,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenRouter ${response.status}: ${errorText}`);
+    }
+
+    const data = (await response.json()) as OpenRouterSearchResponse;
+    const choice = data.choices?.[0]?.message;
+    if (!choice) throw new Error('No response from search model');
+
+    const results: SearchResult[] = [];
+
+    // Extract results from annotations (structured citations)
+    if (choice.annotations && choice.annotations.length > 0) {
+      for (const ann of choice.annotations) {
+        if (ann.type === 'url_citation' && ann.url_citation) {
+          results.push({
+            title: ann.url_citation.title || ann.url_citation.url,
+            url: ann.url_citation.url,
+            snippet: ann.url_citation.content || '',
+          });
+        }
+      }
+    }
+
+    // If we got annotations, return them as structured results + the summary
+    if (results.length > 0) {
+      // Deduplicate by URL
+      const seen = new Set<string>();
+      const deduped = results.filter((r) => {
+        if (seen.has(r.url)) return false;
+        seen.add(r.url);
+        return true;
+      });
+      return deduped.slice(0, 10);
+    }
+
+    // Fallback: if no annotations, return the text content as a single result
+    if (choice.content) {
+      return [{ title: 'Web Search Results', url: '', snippet: choice.content }];
+    }
+
+    return [];
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+// SearXNG fallback for when OpenRouter is unavailable
+const SEARXNG_INSTANCES = [
+  'https://paulgo.io',
+  'https://priv.au',
+  'https://opnxng.com',
+  'https://etsi.me',
+  'https://baresearch.org',
+  'https://ooglester.com',
+];
+
+async function searchViaSearXNG(query: string): Promise<SearchResult[]> {
+  const instances = [...SEARXNG_INSTANCES].sort(() => Math.random() - 0.5);
+  const errors: string[] = [];
+
+  for (const instance of instances) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const url = `${instance}/search?q=${encodeURIComponent(query)}&format=json&categories=general`;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json, text/html' },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const contentType = response.headers.get('content-type') || '';
+      const body = await response.text();
+
+      // Try JSON
+      if (contentType.includes('application/json') || body.trimStart().startsWith('{')) {
+        const data = JSON.parse(body);
+        const rawResults = (data.results || []) as Array<{ title?: string; url?: string; content?: string }>;
+        const results = rawResults.slice(0, 10).map((r) => ({
+          title: r.title || '',
+          url: r.url || '',
+          snippet: r.content ? htmlToText(r.content) : '',
+        })).filter((r: SearchResult) => r.title && r.url);
+        if (results.length > 0) return results;
+      }
+
+      // Fall through if no results from this instance
+      errors.push(`${instance}: no results`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${instance}: ${msg}`);
+    }
+  }
+
+  throw new Error(`SearXNG fallback failed:\n${errors.join('\n')}`);
+}
+
 export const WebSearchTool = defineTool('web_search', {
   description: `Search the web for information.
 
 Usage notes:
-- Returns summarized search results
-- Useful for finding documentation, tutorials, etc.
-- Limited to text-based queries
-
-Note: This tool simulates search by fetching from known documentation sites.
-For full web search, integrate with a search API.`,
+- Returns up to 10 search results with titles, URLs, and snippets
+- Useful for finding documentation, tutorials, and current information
+- Supports site-specific searches`,
   parameters: z.object({
     query: z.string().describe('The search query'),
     site: z.string().optional().describe('Limit search to a specific site (e.g., "docs.python.org")'),
   }),
   async execute(params, _ctx) {
     const { query, site } = params;
+    const fullQuery = site ? `site:${site} ${query}` : query;
 
-    // Build search URL - using DuckDuckGo HTML interface
-    let searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    if (site) {
-      searchUrl = `https://html.duckduckgo.com/html/?q=site:${site}+${encodeURIComponent(query)}`;
+    const ctx = _ctx as { apiKey?: string; provider?: string };
+
+    // Primary for Gemini: use Google Search grounding (free, built-in)
+    if (ctx.apiKey && ctx.provider === 'gemini') {
+      try {
+        const results = await searchViaGemini(ctx.apiKey, fullQuery);
+
+        if (results.length === 0) {
+          return {
+            title: `Search: ${query}`,
+            output: 'No results found. Try a different search query.',
+            metadata: { query, resultCount: 0 },
+          };
+        }
+
+        const output = results.map((r, i) => {
+          const urlLine = r.url ? `\n   ${r.url}` : '';
+          return `${i + 1}. ${r.title}${urlLine}\n   ${r.snippet}`;
+        }).join('\n\n');
+
+        return {
+          title: `Search: ${query}`,
+          output: `Found ${results.length} results:\n\n${output}`,
+          metadata: { query, site, resultCount: results.length, source: 'gemini' },
+        };
+      } catch (err) {
+        console.warn('Gemini grounding search failed, trying fallback:', err);
+      }
     }
 
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    // Primary for OpenRouter: use web search plugin (reliable, uses existing API key)
+    if (ctx.apiKey && ctx.provider === 'openrouter') {
+      try {
+        const results = await searchViaOpenRouter(ctx.apiKey, fullQuery);
 
-      const response = await fetch(searchUrl, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Neo/1.0 (AI Coding Assistant)',
-          'Accept': 'text/html',
-        },
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`Search failed: ${response.status}`);
-      }
-
-      const html = await response.text();
-
-      // Extract search results from DuckDuckGo HTML
-      const results: Array<{ title: string; url: string; snippet: string }> = [];
-      
-      // Pattern for DuckDuckGo result links
-      const resultPattern = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi;
-      const snippetPattern = /<a[^>]*class="result__snippet"[^>]*>([^<]*)/gi;
-
-      let match;
-      while ((match = resultPattern.exec(html)) !== null && results.length < 10) {
-        const url = match[1];
-        const title = match[2].trim();
-        
-        // Find corresponding snippet
-        const snippetMatch = snippetPattern.exec(html);
-        const snippet = snippetMatch ? htmlToText(snippetMatch[1]) : '';
-
-        if (url && title) {
-          results.push({ title, url, snippet });
+        if (results.length === 0) {
+          return {
+            title: `Search: ${query}`,
+            output: 'No results found. Try a different search query.',
+            metadata: { query, resultCount: 0 },
+          };
         }
+
+        const output = results.map((r, i) => {
+          const urlLine = r.url ? `\n   ${r.url}` : '';
+          return `${i + 1}. ${r.title}${urlLine}\n   ${r.snippet}`;
+        }).join('\n\n');
+
+        return {
+          title: `Search: ${query}`,
+          output: `Found ${results.length} results:\n\n${output}`,
+          metadata: { query, site, resultCount: results.length, source: 'openrouter' },
+        };
+      } catch (err) {
+        // OpenRouter failed, fall through to SearXNG
+        console.warn('OpenRouter web search failed, trying SearXNG fallback:', err);
       }
+    }
+
+    // Fallback: SearXNG public instances
+    try {
+      const results = await searchViaSearXNG(fullQuery);
 
       if (results.length === 0) {
         return {
@@ -241,7 +471,6 @@ For full web search, integrate with a search API.`,
         };
       }
 
-      // Format results
       const output = results.map((r, i) => {
         return `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`;
       }).join('\n\n');
@@ -249,18 +478,11 @@ For full web search, integrate with a search API.`,
       return {
         title: `Search: ${query}`,
         output: `Found ${results.length} results:\n\n${output}`,
-        metadata: {
-          query,
-          site,
-          resultCount: results.length,
-        },
+        metadata: { query, site, resultCount: results.length, source: 'searxng' },
       };
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(`Search timed out`);
-      }
-      const error = err instanceof Error ? err.message : String(err);
-      throw new Error(`Search failed: ${error}`);
+    } catch (fallbackErr) {
+      const msg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+      throw new Error(`Web search failed: ${msg}`);
     }
   },
 });

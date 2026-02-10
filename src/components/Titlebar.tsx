@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useLayoutEffect, useEffect } from 'react';
-import { Settings, PanelLeft, MessageSquare, Brain, Copy, Terminal, FolderOpen, ChevronDown } from 'lucide-react';
+import { Settings, PanelLeft, SquarePen, Brain, Copy, Terminal, FolderOpen, ChevronDown } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { DetectedEditor } from '../hooks/useEditorDetection';
 
@@ -343,7 +343,7 @@ export function Titlebar({
             onClick={onNewThread}
             title="New Chat"
           >
-            <MessageSquare size={14} />
+            <SquarePen size={14} />
           </button>
         )}
         {onOpenSettings && (
