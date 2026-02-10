@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Brain, X, StopCircle, ClipboardList, FileText, Sparkles, Search } from 'lucide-react';
 import { Titlebar } from '../components/Titlebar';
 import { ChatInput } from '../components/ChatInput';
@@ -77,6 +77,21 @@ export function ChatView({
 
   // Editor detection
   const { editors, openInEditor, openInFinder, openInTerminal, finderIcon, terminalIcon } = useEditorDetection();
+
+  // Rotating coworker greetings — picked once per thread
+  const coworkGreeting = useMemo(() => {
+    const greetings = [
+      "What are we building today?",
+      "Let's knock something out",
+      "Ready when you are",
+      "What's on deck?",
+      "Let's get to work",
+      "What needs doing?",
+      "Where were we?",
+      "Let's make some progress",
+    ];
+    return greetings[Math.floor(Math.random() * greetings.length)];
+  }, [activeThreadId]);
 
   // Toggle sidebar on the Memory tab
   const handleOpenMemory = useCallback(() => {
@@ -256,7 +271,7 @@ export function ChatView({
             <div className="cowork-empty cowork-grid-bg">
               <div className="cowork-empty-content">
                 <StarburstIcon size={36} className="cowork-starburst" />
-                <h2 className="cowork-empty-heading">Let's knock something off your list</h2>
+                <h2 className="cowork-empty-heading">{coworkGreeting}</h2>
 
                 {/* Info banner - intelligent file system */}
                 <div className="cowork-info-banner">
